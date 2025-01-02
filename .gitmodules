@@ -1,0 +1,6 @@
+[submodule "pyJBU"]
+	path = pyJBU
+	url = https://github.com/LaserBorg/pyJBU.git
+[submodule "Thermal"]
+	path = Thermal
+	url = https://github.com/LaserBorg/MLX90640-pico.git
