@@ -15,8 +15,8 @@ This is a personal project. I want to gain some experience with the sensors and 
 
 the enclosure is designed in 3ds Max and printed using Prusa Slicer. 
 
-<img src="_STL\Screenshot.jpg" width="512"/>
-<img src="_STL\case.jpg" width="512"/>
+<img src="3D-print\Screenshot.jpg" width="512"/>
+<img src="3D-print\case.jpg" width="512"/>
 
 
 ## ToF camera installation
