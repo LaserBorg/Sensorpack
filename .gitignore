@@ -1,0 +1,9 @@
+# temp
+Thumbs.db
+
+_docs/
+_drivers/
+_old/
+
+ToF/output/*
+RGB/output/*

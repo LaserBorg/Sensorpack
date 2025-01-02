@@ -1,0 +1,9 @@
+opencv-python
+open3d
+numpy
+
+ArducamDepthCamera
+
+# not working on rpi venv, passthrough system package instead
+#picamera[array]
+#rpi-libcamera
