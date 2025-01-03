@@ -26,6 +26,15 @@ i2c = busio.I2C(SCL_pin, SDA_pin, frequency=400000)
 bno055 = adafruit_bno055.BNO055_I2C(i2c)
 
 async def read_sensor_data():
+    # print("Temperature:", bno055.temperature)
+    # print("Acceleration:", bno055.acceleration, "Length:", len(bno055.acceleration))
+    # print("Magnetic:", bno055.magnetic, "Length:", len(bno055.magnetic))
+    # print("Gyro:", bno055.gyro, "Length:", len(bno055.gyro))
+    # print("Euler:", bno055.euler, "Length:", len(bno055.euler))
+    # print("Quaternion:", bno055.quaternion, "Length:", len(bno055.quaternion))
+    # print("Linear acceleration:", bno055.linear_acceleration, "Length:", len(bno055.linear_acceleration))
+    # print("Gravity:", bno055.gravity, "Length:", len(bno055.gravity))
+
     # Pack sensor data into a bytearray
     data = struct.pack('f'*23,  # Format string for struct.pack (23 floating point numbers)
         float(bno055.temperature),

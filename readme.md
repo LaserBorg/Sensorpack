@@ -3,23 +3,29 @@
 **! Work in progress !**
 
 a Raspberry Pi Camera Array containing depth, thermal and RGB cameras.  
-It requires Pi 5 for its two CSI ports. It also contains a Pi Pico to preprocess the thermal data, and might eventually receive a BNO055 absolute orientation sensor.
-
-- Arducam ToF Camera ([info](https://www.arducam.com/time-of-flight-camera-raspberry-pi/))
-- Arducam IMX519 16MP Autofocus  ([info](https://www.arducam.com/16mp-autofocus-camera-for-raspberry-pi/), [shop](https://www.arducam.com/product/imx519-autofocus-camera-module-for-raspberry-pi-arducam-b0371/))
-- Pimoroni MLX90640 Thermal Camera Breakout 55° ([shop](https://shop.pimoroni.com/products/mlx90640-thermal-camera-breakout?variant=12536948654163))
+The device contains a Pi Pico/Pico2 to preprocess the thermal sensor data. It might also receive a BNO055 absolute orientation sensor later.
 
 This is a personal project. I want to gain some experience with the sensors and their calibration and registration.
 
-## Enclosure
+I used a Pi5 as host since we need two CSI-ports, but you may also be successful with a CM4 or some CSI multiplexer.
 
-the enclosure is designed in 3ds Max and printed using Prusa Slicer. 
+## Hardware
+
+<img src="3D-print\hardware.jpg" width="1600"/>
+
+Devices:
+- Arducam ToF Camera ([info](https://www.arducam.com/time-of-flight-camera-raspberry-pi/))
+- Arducam IMX519 16MP Autofocus  ([info](https://www.arducam.com/16mp-autofocus-camera-for-raspberry-pi/), [shop](https://www.arducam.com/product/imx519-autofocus-camera-module-for-raspberry-pi-arducam-b0371/))
+- Pimoroni MLX90640 Thermal Camera Breakout 55° ([shop](https://shop.pimoroni.com/products/mlx90640-thermal-camera-breakout?variant=12536948654163))
+- Raspberry Pi Pico / Pico 2
+- Raspberry Pi 5
+
+The enclosure is designed in 3ds Max and printed using Prusa Slicer in PETG for durability. project (max), exports (obj) and slicer (3mf) files are included.
 
 <img src="3D-print\Screenshot.jpg" width="512"/>
-<img src="3D-print\case.jpg" width="512"/>
 
 
-## ToF camera installation
+## ToF camera
 
 this was the original forum thread from April 2024 where I tried to get ToF + 16MP running with in Bookworm:  
 https://forum.arducam.com/t/installation-tof-camera-fails-on-bookworm-could-not-open-device-node-dev-video0/5883/29
@@ -84,3 +90,7 @@ the code is located in a separate repo:
 https://github.com/LaserBorg/pyJBU
 
 I used Cython, multiprocessing and single channel kernels (instead of RGB) to significantly improve execution speed.
+
+## BNO055 Absolute Orientation Sensor
+
+I haven't integrated the sensor in the enclosure design yet, but a basic version of the sender code for CircuitPython (Pico) and the receiver script for the host (Pi5) is already provided for testing purposes.
