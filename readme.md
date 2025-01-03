@@ -24,8 +24,16 @@ The enclosure is designed in 3ds Max and printed using Prusa Slicer in PETG for 
 
 <img src="3D-print\Screenshot.jpg" width="512"/>
 
+## Clone including submodules
 
-## ToF camera
+```
+git clone https://github.com/LaserBorg/Sensorpack.git
+cd Sensorpack  
+git submodule update --init --recursive
+```
+
+
+## build Arducam Pivariety camera driver to install ToF and IMX519 
 
 this was the original forum thread from April 2024 where I tried to get ToF + 16MP running with in Bookworm:  
 https://forum.arducam.com/t/installation-tof-camera-fails-on-bookworm-could-not-open-device-node-dev-video0/5883/29
