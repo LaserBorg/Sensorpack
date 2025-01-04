@@ -56,6 +56,9 @@ class HDRCamera:
 
 
 if __name__ == "__main__":
-    hdrcamera = HDRCamera(0, fstops=1, output_dir="RGB/output")
+    output_dir = "RGB/output"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    hdrcamera = HDRCamera(0, fstops=2, output_dir=output_dir)
     hdrcamera.capture()
     hdrcamera.close()

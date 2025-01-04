@@ -59,7 +59,7 @@ def get_fisheye_intrinsics(shape=(180, 240)):
 
     return K, D
 
-def process_depth(color, depth, K, D):
+def process_depth(confidence, depth, K, D):
 
     def undistort_fisheye_image(image, K, D):
         h, w = image.shape[:2]
@@ -68,10 +68,10 @@ def process_depth(color, depth, K, D):
         undistorted_image = cv2.remap(image, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         return undistorted_image
 
-    color = cv2.cvtColor(color, cv2.COLOR_BGR2RGB)
+    confidence = cv2.cvtColor(confidence, cv2.COLOR_BGR2RGB)
 
     # Undistort the fisheye images
-    undistorted_color = undistort_fisheye_image(color, K, D)
+    undistorted_color = undistort_fisheye_image(confidence, K, D)
     undistorted_depth = undistort_fisheye_image(depth, K, D)
 
     # Convert to Open3D images
@@ -92,11 +92,17 @@ def process_depth(color, depth, K, D):
 
     return pcd
 
-def save_frame(color, depth):
-    # save as 16-bit PNG images
-    depth = depth / 4000 * 32767
-    cv2.imwrite('ToF/output/depth.png', depth.astype(np.uint16))
-    cv2.imwrite('ToF/output/color.png', color.astype(np.uint8))
+def save_frame(frame, output_dir, is_depth=False):
+    '''save as 16-bit PNG images'''
+    if is_depth:
+        frame = frame / 4000 * 32767
+        dtype = np.uint16
+        filename = "depth.png"
+    else: 
+        dtype = np.uint8
+        filename = "confidence.png"
+    
+    cv2.imwrite(os.path.join(output_dir, filename), frame.astype(dtype))
 
 def create_frustum(height=4000, fov=65, aspect_ratio=4/3):
     # frustum = o3d.geometry.AxisAlignedBoundingBox(min_bound=(-2000, -1500, 0), 
@@ -131,6 +137,9 @@ def create_frustum(height=4000, fov=65, aspect_ratio=4/3):
 confidence_thres = 20
 colormap_confidence = False
 save_maps = False
+
+output_dir = "ToF/output/"
+os.makedirs(output_dir, exist_ok=True)
 
 
 def main(cam_id=0, frame_average=0):
@@ -225,12 +234,14 @@ def main(cam_id=0, frame_average=0):
 
             # Reset after some iterations
             if frame_count >= frame_average:
-                # save 16bit depth and color images
+                # save 16bit depth and 8bit confidence frames
                 if save_maps:
-                    save_frame(confidence_normalized, depth)
+                    save_frame(confidence_normalized, output_dir)
+                    save_frame(depth, output_dir, is_depth=True)
 
                 # save point cloud
-                o3d.io.write_point_cloud(f"ToF/output/pcd.ply", pcd, write_ascii=False)
+                pcd_path = os.path.join(output_dir, "pcd.ply")
+                o3d.io.write_point_cloud(pcd_path, pcd, write_ascii=False)
 
                 depth_mean = depth
                 confidence_mean = confidence_buf
