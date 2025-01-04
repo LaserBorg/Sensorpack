@@ -1,0 +1,19 @@
+{
+    "Size": [640, 480],
+
+    "Color": {
+      "position": [320, 240],
+      "scale": [0.1374, 0.1374],
+      "rotation": 0
+    },
+    "Depth": {
+      "position": [325.3, 239.6],
+      "scale": [2.30, 2.14],
+      "rotation": -2.25
+    },
+    "Thermal": {
+      "position": [314, 228.5],
+      "scale": [12.45, 11.625],
+      "rotation": -1.41
+    }
+}

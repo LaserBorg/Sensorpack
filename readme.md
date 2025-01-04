@@ -85,6 +85,7 @@ example rpicam (= libcamera) command for autofocus, fixed exposure and gain for 
 ## Open3D 
 
 <img src="ToF\tof.jpg" width="940"/>
+<img src="ToF\kitchen.jpg" width="940"/>
 
 #### point cloud rendering
 
@@ -99,9 +100,16 @@ because Raspberry Pi only supports OpenGL ES which seems to be not compatible to
     import os
     os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
+## Alignment
+
+<img src="alignment\images\alignment.jpg" width="1920"/>
+
+So far there is just a script that roughly aligns the resulting images using simple 2D position / rotation / scale operations.  
+Next step should be proper calibration including distortions, then unwarping of the ToF cam, which seems to have no planar but spherical image plane. 
+
 ## Joint Bilateral Upscaling
 
-I plan to upscale Depth (240,180) and Thermal (32,24) data using Joint Bilateral Upscaling (JBU) with RGB as reference. It is forked from [Martin Zurowietz's](https://github.com/mzur) implementation of Johannes Kopf's [publication](https://johanneskopf.de/publications/jbu/).
+I plan to upscale Depth (240x180) and Thermal (32x24) data using Joint Bilateral Upscaling (JBU) with RGB as reference. It is forked from [Martin Zurowietz's](https://github.com/mzur) implementation of Johannes Kopf's [publication](https://johanneskopf.de/publications/jbu/).
 
 the code is located in a separate repo:  
 https://github.com/LaserBorg/pyJBU
