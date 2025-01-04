@@ -102,7 +102,7 @@ because Raspberry Pi only supports OpenGL ES which seems to be not compatible to
 
 ## Alignment
 
-<img src="alignment\images\alignment.jpg" width="1920"/>
+<img src="alignment/images/alignment.jpg" width="1920"/>
 
 So far there is just a script that roughly aligns the resulting images using simple 2D position / rotation / scale operations.  
 Next step should be proper calibration including distortions, then unwarping of the ToF cam, which seems to have no planar but spherical image plane. 

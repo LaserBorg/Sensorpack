@@ -12,4 +12,4 @@ ToF/output/*
 RGB/output/*
 
 alignment/images/*
-!alignment/images/preview
+!alignment/images/alignment.jpg
