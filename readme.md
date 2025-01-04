@@ -24,7 +24,7 @@ The enclosure is designed in 3ds Max and printed using Prusa Slicer in PETG for 
 
 <img src="3D-print\Screenshot.jpg" width="512"/>
 
-## Clone including submodules
+## clone including submodules
 
 ```
 git clone https://github.com/LaserBorg/Sensorpack.git
@@ -57,18 +57,20 @@ I used these commands to check if the cameras are connected:
 my ToF camera is ID 8, which is required to initialize the camera driver.
 
 ## Thermal
+I modified existing implementations to send the image buffer via USB serial connection to a receiver script on the host computer. 
+The submodule repo contains forks for Pico implementations running:
 
-**! far from finished !**
-
-So far I just tried existing Pico implementations for 
 - Circuitpython
 - Micropython
 - Pico SDK
-- Arduino 
+- Arduino.
 
-and modified them to send the image buffer via USB serial connection to a receiver script on the Pi.  
+Currently I'm sticking with CircuitPython, simply for ease of use.
 
-Andre Weinand's [Pico SDK implementation](https://github.com/weinand/thermal-imaging-camera) provides ~ 23 fps while Micropython is ~ 4 fps and Arduino & Circuitpython even worse.
+#### Performance
+Andre Weinand's [Pico SDK implementation](https://github.com/weinand/thermal-imaging-camera) provides ~ 23 fps, but unfortunately I'm not fluent with C++ and Piko SDK.
+
+Micropython was ~4 fps and Circuitpython is even worse, so I I swapped the Pico for a Pico 2, which improved the performance a bit.
 
 ## Libcamera and Autofocus
 
@@ -82,10 +84,17 @@ example rpicam (= libcamera) command for autofocus, fixed exposure and gain for 
 
 ## Open3D 
 
-visualization examples, used for point cloud:
-https://www.open3d.org/html/python_example/visualization/index.html
+<img src="ToF\tof.jpg" width="940"/>
 
-because Raspberry Pi only supports OpenGL ES, which is not enough for Open3D, we need to switch to software rendering:
+#### point cloud rendering
+
+I tried to replicate the Arducam pointcloud example (C++) using Python and used the Open3D [visualization examples](https://www.open3d.org/html/python_example/visualization/index.html) as a reference.
+
+It works good so far, but I realized that the depth buffer contains raw distance readings, **which implies that its image plane is spherical, not planar**.  
+Since (I think) Open3D doesn't support distortion coefficients, I tried using OpenCV to undistort the map (_cv2.fisheye.initUndistortRectifyMap_), but haven't calibrated the camera yet, so the necessary coefficients are unknown. **It'd be great if someone could support here.**
+
+#### OpenGL
+because Raspberry Pi only supports OpenGL ES which seems to be not compatible to Open3D, we need to switch to software rendering:
 
     import os
     os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
