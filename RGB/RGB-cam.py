@@ -1,6 +1,7 @@
+from picamera2 import Picamera2, Preview
+import datetime
 import time
 import os
-from picamera2 import Picamera2, Preview
 
 class HDRCamera:
     def __init__(self, cam_id, fstops=1, output_dir="./"):
@@ -36,20 +37,28 @@ class HDRCamera:
         self.picam2.set_controls(self.ctrls_fixedfocus)
 
         # take AEB exposures
-        for i in range(3):
-            ctrls_aeb = {'AnalogueGain': self.aeb_params["AEB"][i]["gain"],
-                         'ExposureTime': self.aeb_params["AEB"][i]["exp"], 
-                         'ColourGains': self.aeb_params["ColourGains"]}
-            self.picam2.set_controls(ctrls_aeb)
-            time.sleep(0.5)
+        if self.fstops > 0:
+            for i in range(3):
+                ctrls_aeb = {'AnalogueGain': self.aeb_params["AEB"][i]["gain"],
+                            'ExposureTime': self.aeb_params["AEB"][i]["exp"], 
+                            'ColourGains': self.aeb_params["ColourGains"]}
+                self.picam2.set_controls(ctrls_aeb)
+                time.sleep(0.5)
 
-            output_path = os.path.join(self.output_dir, f"image_{i}.jpg")
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_path = os.path.join(self.output_dir, f"image{i}_{timestamp}.jpg")
+                self.picam2.switch_mode_and_capture_file(self.image_config, output_path)
+                time.sleep(1)
+
+            # Switch back to continuous autofocus
+            self.picam2.set_controls(self.ctrls_autofocus)
+            #time.sleep(2)  # Wait for the autofocus to complete
+        
+        # take a single exposure
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(self.output_dir, f"image_{timestamp}.jpg")
             self.picam2.switch_mode_and_capture_file(self.image_config, output_path)
-            time.sleep(1)
-
-        # Switch back to continuous autofocus
-        self.picam2.set_controls(self.ctrls_autofocus)
-        #time.sleep(2)  # Wait for the autofocus to complete
 
     def close(self):
         self.picam2.close()
@@ -59,6 +68,6 @@ if __name__ == "__main__":
     output_dir = "RGB/output"
     os.makedirs(output_dir, exist_ok=True)
     
-    hdrcamera = HDRCamera(0, fstops=2, output_dir=output_dir)
+    hdrcamera = HDRCamera(0, fstops=0, output_dir=output_dir)
     hdrcamera.capture()
     hdrcamera.close()
