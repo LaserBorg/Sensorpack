@@ -6,4 +6,10 @@ _drivers/
 _old/
 
 ToF/output/*
+!ToF/output/ficus.jpg
+!ToF/output/kitchen.jpg
+
 RGB/output/*
+
+alignment/images/*
+!alignment/images/alignment.jpg
