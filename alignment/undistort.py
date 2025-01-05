@@ -11,7 +11,7 @@ def undistort_image(filename, mtx, dist):
 
 
 # Load the parameters from the JSON file
-with open('alignment/calibration.json', 'r') as json_file:
+with open('alignment/imx519_calibration.json', 'r') as json_file:
     calibration_data = json.load(json_file)
 
 mtx = np.array(calibration_data['camera_matrix'])
@@ -20,7 +20,7 @@ rvecs = [np.array(r_vec) for r_vec in calibration_data['rotation_vectors']]
 tvecs = [np.array(t_vec).reshape(3, 1) for t_vec in calibration_data['translation_vectors']]
 
 
-input_dir = 'alignment/images/distorted'
+input_dir = 'RGB/output'  # 'alignment/images/distorted'
 output_dir = 'alignment/images/undistorted'
 os.makedirs(output_dir, exist_ok=True)
 

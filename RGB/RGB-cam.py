@@ -45,7 +45,7 @@ class HDRCamera:
                 self.picam2.set_controls(ctrls_aeb)
                 time.sleep(0.5)
 
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
                 output_path = os.path.join(self.output_dir, f"image{i}_{timestamp}.jpg")
                 self.picam2.switch_mode_and_capture_file(self.image_config, output_path)
                 time.sleep(1)

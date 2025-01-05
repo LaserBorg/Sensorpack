@@ -20,7 +20,7 @@ def save_coefficients_as_json(mtx, dist, rvecs, tvecs, path):
         json.dump(calibration_data, outfile, indent=4)
 
 
-input_dir = 'alignment/images/distorted'
+input_dir = 'RGB/output' # 'alignment/images/distorted'
 CHECKERBOARD = (6, 9) 
 epsilon = 0.001
 iterations = 30
@@ -65,7 +65,7 @@ cv2.destroyAllWindows()
 # Perform camera calibration by passing points_3D and its corresponding pixel coordinates (points_2D) 
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(points_3D, points_2D, grayColor.shape[::-1], None, None) 
 
-json_path = 'calibration.json'
+json_path = 'alignment/imx519_calibration.json'
 save_coefficients_as_json(mtx, dist, rvecs, tvecs, json_path)
 
 # print(" Camera matrix:", mtx) 
