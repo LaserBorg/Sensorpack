@@ -2,24 +2,25 @@ import cv2
 import numpy as np
 import ArducamDepthCamera as ac
 import open3d as o3d
+import datetime
 
 import os
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
 
-def filter_buffer(buffer: np.ndarray, confidence: np.ndarray) -> np.ndarray:
+def filter_buffer(buffer: np.ndarray, magnitude: np.ndarray) -> np.ndarray:
     buffer = np.nan_to_num(buffer)
-    buffer[confidence < confidence_thres] = 0
+    buffer[magnitude < magnitude_thres] = 0
     return buffer
 
-def filter_RGB_buffer(buffer: np.ndarray, confidence: np.ndarray) -> np.ndarray:
+def filter_RGB_buffer(buffer: np.ndarray, magnitude: np.ndarray) -> np.ndarray:
     buffer = np.nan_to_num(buffer)
-    buffer[confidence < confidence_thres] = (0, 0, 0)
+    buffer[magnitude < magnitude_thres] = (0, 0, 0)
     return buffer
 
-def on_confidence_changed(value):
-    global confidence_thres
-    confidence_thres = value
+def on_magnitude_changed(value):
+    global magnitude_thres
+    magnitude_thres = value
 
 def get_intrinsic(shape=(180,240)):
     height, width = shape
@@ -59,7 +60,7 @@ def get_fisheye_intrinsics(shape=(180, 240)):
 
     return K, D
 
-def process_depth(confidence, depth, K, D):
+def process_depth(magnitude, depth, K, D):
 
     def undistort_fisheye_image(image, K, D):
         h, w = image.shape[:2]
@@ -68,10 +69,10 @@ def process_depth(confidence, depth, K, D):
         undistorted_image = cv2.remap(image, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         return undistorted_image
 
-    confidence = cv2.cvtColor(confidence, cv2.COLOR_BGR2RGB)
+    magnitude = cv2.cvtColor(magnitude, cv2.COLOR_BGR2RGB)
 
     # Undistort the fisheye images
-    undistorted_color = undistort_fisheye_image(confidence, K, D)
+    undistorted_color = undistort_fisheye_image(magnitude, K, D)
     undistorted_depth = undistort_fisheye_image(depth, K, D)
 
     # Convert to Open3D images
@@ -94,15 +95,17 @@ def process_depth(confidence, depth, K, D):
 
 def save_frame(frame, output_dir, is_depth=False):
     '''save as 16-bit PNG images'''
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
     if is_depth:
         frame = frame / 4000 * 32767
         dtype = np.uint16
-        filename = "depth.png"
+        filepath = os.path.join(output_dir, f"depth_{timestamp}.png")
     else: 
         dtype = np.uint8
-        filename = "confidence.png"
+        filepath = os.path.join(output_dir, f"magnitude_{timestamp}.png")
     
-    cv2.imwrite(os.path.join(output_dir, filename), frame.astype(dtype))
+    cv2.imwrite(filepath, frame.astype(dtype))
 
 def create_frustum(height=4000, fov=65, aspect_ratio=4/3):
     # frustum = o3d.geometry.AxisAlignedBoundingBox(min_bound=(-2000, -1500, 0), 
@@ -134,15 +137,14 @@ def create_frustum(height=4000, fov=65, aspect_ratio=4/3):
     return line_set
 
 
-confidence_thres = 20
-colormap_confidence = False
-save_maps = False
+magnitude_thres = 20
+colormap_magnitude = False
 
 output_dir = "ToF/output/"
 os.makedirs(output_dir, exist_ok=True)
 
 
-def main(cam_id=0, frame_average=0):
+def main(cam_id=0, frame_average=0, save_maps=False):
     cam = ac.ArducamCamera()
 
     ret = 0
@@ -164,7 +166,7 @@ def main(cam_id=0, frame_average=0):
     print(f"Camera resolution: {info.width}x{info.height}")
 
     cv2.namedWindow("depth", cv2.WINDOW_AUTOSIZE)
-    cv2.createTrackbar("confidence", "depth", confidence_thres, 255, on_confidence_changed)
+    cv2.createTrackbar("magnitude", "depth", magnitude_thres, 255, on_magnitude_changed)
 
     vis = o3d.visualization.VisualizerWithKeyCallback()
     vis.create_window("Point Cloud", 640, 480)
@@ -188,45 +190,45 @@ def main(cam_id=0, frame_average=0):
 
     frame = cam.requestFrame(2000)
     depth_mean = frame.getDepthData()
-    confidence_mean = frame.getConfidenceData()
+    magnitude_mean = frame.getConfidenceData()
     frame_count = 0
 
     while not exit_flag:
         frame = cam.requestFrame(2000)
         if frame is not None and isinstance(frame, ac.DepthData):
             depth = frame.getDepthData()
-            confidence_buf = frame.getConfidenceData()
+            magnitude_buf = frame.getConfidenceData()
             
             depth_mean = (depth_mean * frame_count + depth) / (frame_count + 1)
-            confidence_mean = (confidence_mean * frame_count + confidence_buf) / (frame_count + 1)
+            magnitude_mean = (magnitude_mean * frame_count + magnitude_buf) / (frame_count + 1)
             frame_count += 1
 
-            depth = filter_buffer(depth_mean, confidence_mean)
-            confidence_buf = confidence_mean
+            depth = filter_buffer(depth_mean, magnitude_mean)
+            magnitude_buf = magnitude_mean
             
-            # normalized confidence buffer
-            confidence_clipped = np.clip(confidence_buf, 0, np.percentile(confidence_buf, 99))
-            confidence_normalized = cv2.normalize(confidence_clipped, None, 0, 1, cv2.NORM_MINMAX)
-            confidence_normalized = (confidence_normalized * 255.0).astype(np.uint8)
-            cv2.imshow("confidence", confidence_normalized)
+            # normalized magnitude buffer
+            magnitude_clipped = np.clip(magnitude_buf, 0, np.percentile(magnitude_buf, 99))
+            magnitude_normalized = cv2.normalize(magnitude_clipped, None, 0, 1, cv2.NORM_MINMAX)
+            magnitude_normalized = (magnitude_normalized * 255.0).astype(np.uint8)
+            cv2.imshow("magnitude", magnitude_normalized)
 
-            # colorized confidence
-            if colormap_confidence:
-                confidence_normalized = cv2.applyColorMap(confidence_normalized, cv2.COLORMAP_VIRIDIS)
+            # colorized magnitude
+            if colormap_magnitude:
+                magnitude_normalized = cv2.applyColorMap(magnitude_normalized, cv2.COLORMAP_VIRIDIS)
 
             # colorized depth buffer
             colorized_depth = (depth * (255.0 / r)).astype(np.uint8)
             colorized_depth = cv2.bitwise_not(colorized_depth)
-            colorized_depth = filter_buffer(colorized_depth, confidence_buf)
+            colorized_depth = filter_buffer(colorized_depth, magnitude_buf)
             cv2.imshow("depth", colorized_depth)
             
             # denoise depth
             #depth = cv2.bilateralFilter(depth, d=5, sigmaColor=75, sigmaSpace=75)
             
             # create point cloud
-            current_pcd = process_depth(confidence_normalized, depth, K, D)
+            current_pcd = process_depth(magnitude_normalized, depth, K, D)
             
-            # Filter points based on confidence
+            # Filter points based on magnitude
             #current_pcd = filter_points(current_pcd, thres=20)
             
             pcd.points = current_pcd.points
@@ -234,9 +236,9 @@ def main(cam_id=0, frame_average=0):
 
             # Reset after some iterations
             if frame_count >= frame_average:
-                # save 16bit depth and 8bit confidence frames
+                # save 16bit depth and 8bit magnitude frames
                 if save_maps:
-                    save_frame(confidence_normalized, output_dir)
+                    save_frame(magnitude_normalized, output_dir)
                     save_frame(depth, output_dir, is_depth=True)
 
                 # save point cloud
@@ -244,7 +246,7 @@ def main(cam_id=0, frame_average=0):
                 o3d.io.write_point_cloud(pcd_path, pcd, write_ascii=False)
 
                 depth_mean = depth
-                confidence_mean = confidence_buf
+                magnitude_mean = magnitude_buf
                 frame_count = 0
 
             vis.update_geometry(pcd)
@@ -261,4 +263,4 @@ def main(cam_id=0, frame_average=0):
 
 
 if __name__ == "__main__":
-    main(cam_id=8, frame_average=15)
+    main(cam_id=8, frame_average=20, save_maps=False)
