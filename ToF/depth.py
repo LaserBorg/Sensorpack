@@ -8,30 +8,19 @@ import os
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
 
-def filter_buffer(buffer: np.ndarray, magnitude: np.ndarray) -> np.ndarray:
+def filter_buffer(buffer: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
     buffer = np.nan_to_num(buffer)
-    buffer[magnitude < magnitude_thres] = 0
+    buffer[amplitude < amplitude_thres] = 0
     return buffer
 
-def filter_RGB_buffer(buffer: np.ndarray, magnitude: np.ndarray) -> np.ndarray:
+def filter_RGB_buffer(buffer: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
     buffer = np.nan_to_num(buffer)
-    buffer[magnitude < magnitude_thres] = (0, 0, 0)
+    buffer[amplitude < amplitude_thres] = (0, 0, 0)
     return buffer
 
-def on_magnitude_changed(value):
-    global magnitude_thres
-    magnitude_thres = value
-
-def get_intrinsic(shape=(180,240)):
-    height, width = shape
-
-    fx = width / (2 * np.tan(0.5 * np.pi * 64.3 / 180))
-    fy = height / (2 * np.tan(0.5 * np.pi * 50.4 / 180))
-    cx = width / 2
-    cy = height / 2
-
-    camera_intrinsic = o3d.camera.PinholeCameraIntrinsic(width, height, fx, fy, cx, cy)
-    return camera_intrinsic
+def on_amplitude_changed(value):
+    global amplitude_thres
+    amplitude_thres = value
 
 def filter_points(pcd, thres=20):
     colors = np.asarray(pcd.colors)
@@ -40,50 +29,31 @@ def filter_points(pcd, thres=20):
     pcd = pcd.select_by_index(np.where(mask)[0])
     return pcd
 
-def get_fisheye_intrinsics(shape=(180, 240)):
+def get_intrinsic(shape=(180, 240), fov=(64.3, 50.4)):
     height, width = shape
 
-    # Fisheye camera model parameters
-    fx = width / (2 * np.tan(0.5 * np.pi * 64.3 / 180))
-    fy = height / (2 * np.tan(0.5 * np.pi * 50.4 / 180))
+    # camera model parameters
+    fx = width / (2 * np.tan(0.5 * np.pi * fov[0] / 180))
+    fy = height / (2 * np.tan(0.5 * np.pi * fov[1] / 180))
     cx = width / 2
     cy = height / 2
 
-    # Fisheye distortion coefficients
-    # TODO: calibrate
-    k1, k2, k3, k4 = 0.0, 0.0, 0.0, 0.0
+    # K = np.array([[fx, 0, cx],
+    #               [0, fy, cy],
+    #               [0, 0, 1]])
 
-    K = np.array([[fx, 0, cx],
-                  [0, fy, cy],
-                  [0, 0, 1]])
-    D = np.array([k1, k2, k3, k4])
+    camera_intrinsic = o3d.camera.PinholeCameraIntrinsic(width, height, fx, fy, cx, cy)
+    return camera_intrinsic
 
-    return K, D
-
-def process_depth(magnitude, depth, K, D):
-
-    def undistort_fisheye_image(image, K, D):
-        h, w = image.shape[:2]
-        new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(K, D, (w, h), np.eye(3), balance=1)
-        map1, map2 = cv2.fisheye.initUndistortRectifyMap(K, D, np.eye(3), new_K, (w, h), cv2.CV_16SC2)
-        undistorted_image = cv2.remap(image, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-        return undistorted_image
-
-    magnitude = cv2.cvtColor(magnitude, cv2.COLOR_BGR2RGB)
-
-    # Undistort the fisheye images
-    undistorted_color = undistort_fisheye_image(magnitude, K, D)
-    undistorted_depth = undistort_fisheye_image(depth, K, D)
+def process_depth(amplitude, depth, camera_intrinsic):
+    amplitude = cv2.cvtColor(amplitude, cv2.COLOR_BGR2RGB)
 
     # Convert to Open3D images
-    depth_image = o3d.geometry.Image(undistorted_depth)
-    color_image = o3d.geometry.Image(undistorted_color)
+    depth_image = o3d.geometry.Image(depth)
+    color_image = o3d.geometry.Image(amplitude)
 
     rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
         color_image, depth_image, depth_scale=1.0, depth_trunc=4000.0, convert_rgb_to_intensity=False)
-
-    camera_intrinsic = o3d.camera.PinholeCameraIntrinsic(
-        undistorted_color.shape[1], undistorted_color.shape[0], K[0, 0], K[1, 1], K[0, 2], K[1, 2])
 
     pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, camera_intrinsic)
 
@@ -103,7 +73,7 @@ def save_frame(frame, output_dir, is_depth=False):
         filepath = os.path.join(output_dir, f"depth_{timestamp}.png")
     else: 
         dtype = np.uint8
-        filepath = os.path.join(output_dir, f"magnitude_{timestamp}.png")
+        filepath = os.path.join(output_dir, f"amplitude_{timestamp}.png")
     
     cv2.imwrite(filepath, frame.astype(dtype))
 
@@ -137,8 +107,8 @@ def create_frustum(height=4000, fov=65, aspect_ratio=4/3):
     return line_set
 
 
-magnitude_thres = 20
-colormap_magnitude = False
+amplitude_thres = 20
+colormap_amplitude = False
 
 output_dir = "ToF/output/"
 os.makedirs(output_dir, exist_ok=True)
@@ -162,11 +132,11 @@ def main(cam_id=0, frame_average=0, save_maps=False):
     r = cam.getControl(ac.TOFControl.RANGE)
 
     info = cam.getCameraInfo()
-    K, D = get_fisheye_intrinsics(shape=(info.height, info.width))
+    camera_intrinsic = get_intrinsic(shape=(info.height, info.width))
     print(f"Camera resolution: {info.width}x{info.height}")
 
     cv2.namedWindow("depth", cv2.WINDOW_AUTOSIZE)
-    cv2.createTrackbar("magnitude", "depth", magnitude_thres, 255, on_magnitude_changed)
+    cv2.createTrackbar("amplitude", "depth", amplitude_thres, 255, on_amplitude_changed)
 
     vis = o3d.visualization.VisualizerWithKeyCallback()
     vis.create_window("Point Cloud", 640, 480)
@@ -190,45 +160,45 @@ def main(cam_id=0, frame_average=0, save_maps=False):
 
     frame = cam.requestFrame(2000)
     depth_mean = frame.getDepthData()
-    magnitude_mean = frame.getConfidenceData()
+    amplitude_mean = frame.getConfidenceData()
     frame_count = 0
 
     while not exit_flag:
         frame = cam.requestFrame(2000)
         if frame is not None and isinstance(frame, ac.DepthData):
             depth = frame.getDepthData()
-            magnitude_buf = frame.getConfidenceData()
+            amplitude_buf = frame.getConfidenceData()
             
             depth_mean = (depth_mean * frame_count + depth) / (frame_count + 1)
-            magnitude_mean = (magnitude_mean * frame_count + magnitude_buf) / (frame_count + 1)
+            amplitude_mean = (amplitude_mean * frame_count + amplitude_buf) / (frame_count + 1)
             frame_count += 1
 
-            depth = filter_buffer(depth_mean, magnitude_mean)
-            magnitude_buf = magnitude_mean
+            depth = filter_buffer(depth_mean, amplitude_mean)
+            amplitude_buf = amplitude_mean
             
-            # normalized magnitude buffer
-            magnitude_clipped = np.clip(magnitude_buf, 0, np.percentile(magnitude_buf, 99))
-            magnitude_normalized = cv2.normalize(magnitude_clipped, None, 0, 1, cv2.NORM_MINMAX)
-            magnitude_normalized = (magnitude_normalized * 255.0).astype(np.uint8)
-            cv2.imshow("magnitude", magnitude_normalized)
+            # normalized amplitude buffer
+            amplitude_clipped = np.clip(amplitude_buf, 0, np.percentile(amplitude_buf, 99))
+            amplitude_normalized = cv2.normalize(amplitude_clipped, None, 0, 1, cv2.NORM_MINMAX)
+            amplitude_normalized = (amplitude_normalized * 255.0).astype(np.uint8)
+            cv2.imshow("amplitude", amplitude_normalized)
 
-            # colorized magnitude
-            if colormap_magnitude:
-                magnitude_normalized = cv2.applyColorMap(magnitude_normalized, cv2.COLORMAP_VIRIDIS)
+            # colorized amplitude
+            if colormap_amplitude:
+                amplitude_normalized = cv2.applyColorMap(amplitude_normalized, cv2.COLORMAP_VIRIDIS)
 
             # colorized depth buffer
             colorized_depth = (depth * (255.0 / r)).astype(np.uint8)
             colorized_depth = cv2.bitwise_not(colorized_depth)
-            colorized_depth = filter_buffer(colorized_depth, magnitude_buf)
+            colorized_depth = filter_buffer(colorized_depth, amplitude_buf)
             cv2.imshow("depth", colorized_depth)
             
             # denoise depth
             #depth = cv2.bilateralFilter(depth, d=5, sigmaColor=75, sigmaSpace=75)
             
             # create point cloud
-            current_pcd = process_depth(magnitude_normalized, depth, K, D)
+            current_pcd = process_depth(amplitude_normalized, depth, camera_intrinsic)
             
-            # Filter points based on magnitude
+            # Filter points based on amplitude
             #current_pcd = filter_points(current_pcd, thres=20)
             
             pcd.points = current_pcd.points
@@ -236,9 +206,9 @@ def main(cam_id=0, frame_average=0, save_maps=False):
 
             # Reset after some iterations
             if frame_count >= frame_average:
-                # save 16bit depth and 8bit magnitude frames
+                # save 16bit depth and 8bit amplitude frames
                 if save_maps:
-                    save_frame(magnitude_normalized, output_dir)
+                    save_frame(amplitude_normalized, output_dir)
                     save_frame(depth, output_dir, is_depth=True)
 
                 # save point cloud
@@ -246,7 +216,7 @@ def main(cam_id=0, frame_average=0, save_maps=False):
                 o3d.io.write_point_cloud(pcd_path, pcd, write_ascii=False)
 
                 depth_mean = depth
-                magnitude_mean = magnitude_buf
+                amplitude_mean = amplitude_buf
                 frame_count = 0
 
             vis.update_geometry(pcd)

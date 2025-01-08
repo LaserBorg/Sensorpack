@@ -20,8 +20,9 @@ def save_coefficients_as_json(mtx, dist, rvecs, tvecs, path):
         json.dump(calibration_data, outfile, indent=4)
 
 
-input_dir = 'RGB/output' # 'alignment/images/distorted'
-CHECKERBOARD = (6, 9) 
+input_dir = 'ToF/output/v1' # 'alignment/images/distorted'
+ext = '.png'  # '.jpg'
+CHECKERBOARD = (7, 7)  # (6, 9) 
 epsilon = 0.001
 iterations = 30
 
@@ -37,7 +38,7 @@ objectp3d = np.zeros((1, CHECKERBOARD[0] * CHECKERBOARD[1], 3), np.float32)
 objectp3d[0, :, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2) 
 prev_img_shape = None
 
-images = glob.glob(os.path.join(input_dir, '*.jpg')) 
+images = glob.glob(os.path.join(input_dir, '*' + ext)) 
 
 for filename in images: 
     image = cv2.imread(filename) 
@@ -65,7 +66,7 @@ cv2.destroyAllWindows()
 # Perform camera calibration by passing points_3D and its corresponding pixel coordinates (points_2D) 
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(points_3D, points_2D, grayColor.shape[::-1], None, None) 
 
-json_path = 'alignment/imx519_calibration.json'
+json_path = 'alignment/ToF_calibration.json'
 save_coefficients_as_json(mtx, dist, rvecs, tvecs, json_path)
 
 # print(" Camera matrix:", mtx) 
