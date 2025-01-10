@@ -1,5 +1,6 @@
 # temp
 Thumbs.db
+__pycache__/
 
 _docs/
 _drivers/
