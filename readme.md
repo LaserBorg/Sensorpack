@@ -15,7 +15,7 @@ I used a Pi5 as host since we need two CSI-ports, but you may also be successful
 
 Devices:
 - Arducam ToF Camera ([info](https://www.arducam.com/time-of-flight-camera-raspberry-pi/))
-- Arducam IMX519 16MP Autofocus  ([info](https://www.arducam.com/16mp-autofocus-camera-for-raspberry-pi/), [shop](https://www.arducam.com/product/imx519-autofocus-camera-module-for-raspberry-pi-arducam-b0371/))
+- Raspberry Pi Camera Module 3 ([info](https://www.raspberrypi.com/products/raspberry-pi-camera-3/))
 - Pimoroni MLX90640 Thermal Camera Breakout 55° ([shop](https://shop.pimoroni.com/products/mlx90640-thermal-camera-breakout?variant=12536948654163))
 - Raspberry Pi Pico / Pico 2
 - Raspberry Pi 5
@@ -33,20 +33,18 @@ git submodule update --init --recursive
 ```
 
 
-## build Arducam Pivariety camera driver to install ToF and IMX519 
+## build Arducam Pivariety camera driver to install the ToF camera
 
 this was the original forum thread from April 2024 where I tried to get ToF + 16MP running with in Bookworm:  
 https://forum.arducam.com/t/installation-tof-camera-fails-on-bookworm-could-not-open-device-node-dev-video0/5883/29
 
-first, install Arducam Pivariety Driver for ToF as described ([troubleshooting](https://docs.arducam.com/Raspberry-Pi-Camera/Tof-camera/Troubleshooting/#4-cannot-be-used-on-raspberry-pi5)):
+install the Arducam Pivariety Driver for the ToF camera as described ([troubleshooting](https://docs.arducam.com/Raspberry-Pi-Camera/Tof-camera/Troubleshooting/#4-cannot-be-used-on-raspberry-pi5)):
 https://docs.arducam.com/Raspberry-Pi-Camera/Tof-camera/Getting-Started/
 
-then install IMX519:    
-https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/16MP-IMX519/
+The RGB camera is a Raspberry Pi Camera Module 3, which is natively supported by libcamera — no extra driver needed.
 
-With IMX519 at CSI-0 and ToF at CSI-1 attached, make sure your /boot/firmware/config.txt looks like this:
+With the Pi Cam 3 at CSI-0 and the ToF at CSI-1 attached, make sure your /boot/firmware/config.txt looks like this:
 
-    dtoverlay=imx519, cam0
     dtoverlay=arducam-pivariety
 
 I used these commands to check if the cameras are connected: 
@@ -72,15 +70,16 @@ Andre Weinand's [Pico SDK implementation](https://github.com/weinand/thermal-ima
 
 Micropython was ~4 fps and Circuitpython is even worse, so I I swapped the Pico for a Pico 2, which improved the performance a bit.
 
-## Libcamera and Autofocus
+## Libcamera
 
 some Info about Libcamera commands:
-- https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/Libcamera-User-Guide/#for-arducam-16mp64mp-autofocus-camera
 - https://www.raspberrypi.com/documentation/computers/camera_software.html
 
-example rpicam (= libcamera) command for autofocus, fixed exposure and gain for IMX519: 
+The RGB camera is a Raspberry Pi Camera Module 3 (62° FOV). It has moderate lens distortion, so it should be calibrated with a pinhole model plus distortion coefficients (`cv2.calibrateCamera`) rather than assuming an ideal pinhole.
 
-    rpicam-still --autofocus-mode auto --autofocus-range normal --width 4656 --height 3496 --shutter 500000 --gain 2 -e png -o RGB/image.png
+example rpicam (= libcamera) command for a fixed exposure and gain: 
+
+    rpicam-still --width 1920 --height 1080 --shutter 500000 --gain 2 -e png -o RGB/image.png
 
 ## Open3D 
 
@@ -91,8 +90,9 @@ example rpicam (= libcamera) command for autofocus, fixed exposure and gain for 
 
 I tried to replicate the Arducam pointcloud example (C++) using Python and used the Open3D [visualization examples](https://www.open3d.org/html/python_example/visualization/index.html) as a reference.
 
-It works good so far, but I realized that the depth buffer contains raw distance readings, **which implies that its image plane is spherical, not planar**.  
-Since (I think) Open3D doesn't support distortion coefficients, I tried using OpenCV to undistort the map (_cv2.fisheye.initUndistortRectifyMap_), but haven't calibrated the camera yet, so the necessary coefficients are unknown. **It'd be great if someone could support here.**
+The depth buffer contains per-pixel **slant-range** readings (distance along each ray, in mm), not a planar z-depth. To get a proper pinhole z-depth you divide by the ray's normalized length: `z = d / sqrt(x² + y² + 1)` where `x=(u-cx)/fx`, `y=(v-cy)/fy` (see `convert_distance_to_zdepth`).
+
+The pivariety driver exposes the camera's **firmware-calibrated intrinsics** (`INTRINSIC_FX/FY/CX/CY`, raw values are ×100), which is far more accurate than assuming a nominal FOV. `get_intrinsic_driver()` reads them directly. Note the driver does *not* return cartesian coordinates — it only gives the depth buffer plus these intrinsics, so the slant→z conversion above is still required.
 
 #### OpenGL
 because Raspberry Pi only supports OpenGL ES which seems to be not compatible to Open3D, we need to switch to software rendering:
@@ -104,8 +104,9 @@ because Raspberry Pi only supports OpenGL ES which seems to be not compatible to
 
 <img src="alignment/images/alignment.jpg" width="1920"/>
 
-So far there is just a script that roughly aligns the resulting images using simple 2D position / rotation / scale operations.  
-Next step should be proper calibration including distortions, then unwarping of the ToF cam, which seems to have no planar but spherical image plane. 
+So far there is just a script that roughly aligns the resulting images using simple 2D position / rotation / scale operations.
+
+Next step is proper calibration. Because the RGB and ToF cameras are not coaxial, a homography (single-plane mapping) is not enough — but a checkerboard gives known 3D points, so each camera's pose relative to the board can be solved independently (`cv2.solvePnP`) and the full 6-DoF extrinsic between the cameras falls out of that. The plan is to calibrate both 2D cameras against the ToF point cloud so that RGB and thermal values can be assigned per point.
 
 ## Joint Bilateral Upscaling
 

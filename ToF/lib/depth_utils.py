@@ -58,6 +58,21 @@ def get_intrinsic(shape=(240,180), fov=70):
     return camera_intrinsic
 
 
+def get_intrinsic_driver(cam):
+    '''Read the camera's firmware-calibrated intrinsics from the Arducam pivariety driver.
+
+    The driver exposes the real fx/fy/cx/cy (raw values are x100), which is far
+    more accurate than assuming a nominal FOV.
+    '''
+    import ArducamDepthCamera as ac
+    fx = cam.getControl(ac.Control.INTRINSIC_FX) / 100.0
+    fy = cam.getControl(ac.Control.INTRINSIC_FY) / 100.0
+    cx = cam.getControl(ac.Control.INTRINSIC_CX) / 100.0
+    cy = cam.getControl(ac.Control.INTRINSIC_CY) / 100.0
+    info = cam.getCameraInfo()
+    return o3d.camera.PinholeCameraIntrinsic(info.width, info.height, fx, fy, cx, cy)
+
+
 def create_frustum(height=4000, fov=65, aspect_ratio=4/3):
     # frustum = o3d.geometry.AxisAlignedBoundingBox(min_bound=(-2000, -1500, 0), max_bound=(2000, 1500, -4000))
 

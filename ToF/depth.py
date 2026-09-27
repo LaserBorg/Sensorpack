@@ -3,7 +3,7 @@ import numpy as np
 import ArducamDepthCamera as ac
 import open3d as o3d
 
-from lib.depth_utils import save_frame, get_intrinsic, create_frustum, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer, apply_default_view
+from lib.depth_utils import save_frame, get_intrinsic_driver, create_frustum, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer, apply_default_view
 
 import os
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
@@ -26,7 +26,7 @@ output_dir = "ToF/output/"
 os.makedirs(output_dir, exist_ok=True)
 
 
-def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, fov=70, confidence=20):
+def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, confidence=20):
     cam = ac.ArducamCamera()
 
     bilateralfilter = False
@@ -46,8 +46,10 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, fov=70, con
     r = cam.getControl(ac.Control.RANGE)
 
     info = cam.getCameraInfo()
-    camera_intrinsic = get_intrinsic(shape=(info.height, info.width), fov=fov)
+    # Use the firmware-calibrated intrinsics from the driver instead of assuming a nominal FOV
+    camera_intrinsic = get_intrinsic_driver(cam)
     print(f"Camera resolution: {info.width}x{info.height}")
+    print(f"Intrinsics (driver): fx={camera_intrinsic.intrinsic_matrix[0,0]:.2f} fy={camera_intrinsic.intrinsic_matrix[1,1]:.2f} cx={camera_intrinsic.intrinsic_matrix[0,2]:.2f} cy={camera_intrinsic.intrinsic_matrix[1,2]:.2f}")
 
     cv2.namedWindow("depth", cv2.WINDOW_AUTOSIZE)
     cv2.createTrackbar("amplitude", "depth", amplitude_thres, 255, on_amplitude_changed)
@@ -150,4 +152,4 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, fov=70, con
 
 
 if __name__ == "__main__":
-    main(cam_id=8, frame_average=15, save_maps=False)
+    main(cam_id=8, frame_average=10, save_maps=False)

@@ -1,4 +1,4 @@
-from lib.depth_utils import load_frame, get_intrinsic, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer, apply_default_view
+from lib.depth_utils import load_frame, get_intrinsic_driver, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer, apply_default_view
 
 
 if __name__ == "__main__":
@@ -17,9 +17,6 @@ if __name__ == "__main__":
     # color_path = "ToF/output/synthetic/amplitude.png"
     # depth_path = "ToF/output/synthetic/depth.png"
 
-    shape = (240,180)
-    fov = 70
-
     max_depth = 4000
     confidence = 20
 
@@ -33,10 +30,14 @@ if __name__ == "__main__":
 
     if bilateralfilter:
         depth = cv2.bilateralFilter(depth, d=5, sigmaColor=75, sigmaSpace=75)
-    
-    
-    camera_intrinsic = get_intrinsic(shape, fov)
-    #print(camera_intrinsic.intrinsic_matrix)
+
+    # Read the firmware-calibrated intrinsics from the driver (open camera for control values only)
+    import ArducamDepthCamera as ac
+    cam = ac.ArducamCamera()
+    cam.open(ac.Connection.CSI, 8)
+    camera_intrinsic = get_intrinsic_driver(cam)
+    cam.close()
+    print(camera_intrinsic.intrinsic_matrix)
 
     zdepth = convert_distance_to_zdepth(depth, camera_intrinsic)
     rgbd_image = create_rgbd(color, zdepth)
