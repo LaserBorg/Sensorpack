@@ -68,6 +68,6 @@ if __name__ == "__main__":
     output_dir = "RGB/output"
     os.makedirs(output_dir, exist_ok=True)
     
-    hdrcamera = HDRCamera(0, fstops=0, output_dir=output_dir)
+    hdrcamera = HDRCamera(0, fstops=2, output_dir=output_dir)
     hdrcamera.capture()
     hdrcamera.close()
