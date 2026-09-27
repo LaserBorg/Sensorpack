@@ -4,7 +4,7 @@ import time
 import os
 
 class HDRCamera:
-    def __init__(self, cam_id, fstops=1, output_dir="./"):
+    def __init__(self, cam_id, fstops=2, output_dir="./"):
         self.fstops = fstops
         self.output_dir = output_dir
 

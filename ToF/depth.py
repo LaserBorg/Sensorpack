@@ -3,7 +3,7 @@ import numpy as np
 import ArducamDepthCamera as ac
 import open3d as o3d
 
-from lib.depth_utils import save_frame, get_intrinsic, create_frustum, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer
+from lib.depth_utils import save_frame, get_intrinsic, create_frustum, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer, apply_default_view
 
 import os
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
@@ -61,6 +61,9 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, fov=70, con
     
     pcd = o3d.geometry.PointCloud()
     vis.add_geometry(pcd)
+
+    # add_geometry() resets the view, so apply the default orientation afterwards
+    apply_default_view(vis)
 
     exit_flag = False
 
@@ -147,4 +150,4 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, fov=70, con
 
 
 if __name__ == "__main__":
-    main(cam_id=8, frame_average=20, save_maps=False)
+    main(cam_id=8, frame_average=15, save_maps=False)

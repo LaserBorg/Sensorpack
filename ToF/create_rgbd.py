@@ -1,4 +1,4 @@
-from lib.depth_utils import load_frame, get_intrinsic, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer
+from lib.depth_utils import load_frame, get_intrinsic, convert_distance_to_zdepth, create_rgbd, filter_by_luminance, create_visualizer, apply_default_view
 
 
 if __name__ == "__main__":
@@ -49,6 +49,7 @@ if __name__ == "__main__":
 
     vis = create_visualizer()
     vis.add_geometry(pcd)
+    apply_default_view(vis)  # add_geometry() resets the view
     vis.run()
 
     cv2.destroyAllWindows()

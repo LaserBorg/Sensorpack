@@ -67,10 +67,10 @@ def create_frustum(height=4000, fov=65, aspect_ratio=4/3):
 
     vertices = [
         [0, 0, 0],  # Tip of the pyramid
-        [-half_width, -half_depth, -half_height],  # Base vertices
-        [half_width, -half_depth, -half_height],
-        [half_width, half_depth, -half_height],
-        [-half_width, half_depth, -half_height]
+        [-half_width, -half_depth, half_height],  # Base vertices (Open3D camera looks down +Z)
+        [half_width, -half_depth, half_height],
+        [half_width, half_depth, half_height],
+        [-half_width, half_depth, half_height]
     ]
 
     lines = [
@@ -121,6 +121,16 @@ def filter_by_luminance(pcd, confidence=20):
     return pcd
 
 
+def apply_default_view(vis):
+    '''set the default camera orientation; must be called AFTER add_geometry(),
+    since add_geometry() resets the view to fit the new geometry'''
+    view_control = vis.get_view_control()
+    view_control.set_up([0, -1, 0])
+    view_control.set_front([0, 0, -1])
+    view_control.set_lookat([0, 0, 0])
+    view_control.set_zoom(0.01)
+
+
 def create_visualizer(shape=(640,480), pointsize=2., bgcolor=(0, 0, 0)):
     # vis = o3d.visualization.Visualizer()
     vis = o3d.visualization.VisualizerWithKeyCallback()
@@ -130,8 +140,5 @@ def create_visualizer(shape=(640,480), pointsize=2., bgcolor=(0, 0, 0)):
     render_option.point_size = pointsize
     render_option.background_color = bgcolor
 
-    view_control = vis.get_view_control()
-    view_control.set_up([0, -1, 0])
-    view_control.set_front([0, 0, -1])
-    view_control.set_lookat([0, 0, 0])
+    apply_default_view(vis)
     return vis
