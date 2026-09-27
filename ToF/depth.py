@@ -32,18 +32,18 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, fov=70, con
     bilateralfilter = False
 
     ret = 0
-    ret = cam.open(ac.TOFConnect.CSI, cam_id)
+    ret = cam.open(ac.Connection.CSI, cam_id)
     if ret != 0:
         print("Failed to open camera. Error code:", ret)
         return
 
-    ret = cam.start(ac.TOFOutput.DEPTH)
+    ret = cam.start(ac.FrameType.DEPTH)
     if ret != 0:
         print("Failed to start camera. Error code:", ret)
         cam.close()
         return
 
-    r = cam.getControl(ac.TOFControl.RANGE)
+    r = cam.getControl(ac.Control.RANGE)
 
     info = cam.getCameraInfo()
     camera_intrinsic = get_intrinsic(shape=(info.height, info.width), fov=fov)
@@ -71,15 +71,15 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, fov=70, con
     vis.register_key_callback(ord("q"), exit_callback)
 
     frame = cam.requestFrame(2000)
-    depth_mean = frame.getDepthData()
-    amplitude_mean = frame.getConfidenceData()
+    depth_mean = frame.depth_data
+    amplitude_mean = frame.confidence_data
     frame_count = 0
 
     while not exit_flag:
         frame = cam.requestFrame(2000)
         if frame is not None and isinstance(frame, ac.DepthData):
-            depth = frame.getDepthData()
-            amplitude_buf = frame.getConfidenceData()
+            depth = frame.depth_data
+            amplitude_buf = frame.confidence_data
             
             depth_mean = (depth_mean * frame_count + depth) / (frame_count + 1)
             amplitude_mean = (amplitude_mean * frame_count + amplitude_buf) / (frame_count + 1)

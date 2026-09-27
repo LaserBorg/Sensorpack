@@ -1,9 +1,9 @@
 opencv-python
 open3d
-numpy
+numpy<2.0.0  # ArducamDepthCamera (system) requires numpy<2.0.0
 
-ArducamDepthCamera
-
-# not working on rpi venv, passthrough system package instead
+# installed system-wide by Arducam_tof_camera/Install_dependencies.sh,
+# passthrough system package instead (venv copy would shadow it)
+#ArducamDepthCamera
 #picamera[array]
 #rpi-libcamera
