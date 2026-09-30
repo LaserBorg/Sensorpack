@@ -81,10 +81,19 @@ example rpicam (= libcamera) command for a fixed exposure and gain:
 
     rpicam-still --width 1920 --height 1080 --shutter 500000 --gain 2 -e png -o RGB/image.png
 
+`python RGB/RGB-cam.py` captures three JPEGs at different shutter times with
+fixed gain and white balance, then writes a floating-point Radiance `.hdr` file
+to `RGB/output/`. It saves the actual exposure metadata in a `bracket_*.json`
+sidecar and estimates a per-channel JPEG response curve on the first run,
+reusing `RGB/output/camera_response.npz` while gain, white balance, and image
+size match. Keep the scene still during the bracket. Delete the response cache
+if you change camera mode, ISP processing, or JPEG settings; the existing older
+JPEGs have no measured exposure metadata and cannot be merged reliably as-is.
+
 ## Open3D 
 
-<img src="ToF\tof.jpg" width="940"/>
-<img src="ToF\kitchen.jpg" width="940"/>
+<img src="docs/tof.jpg" width="940"/>
+<img src="docs/kitchen.jpg" width="940"/>
 
 #### point cloud rendering
 
@@ -102,11 +111,9 @@ because Raspberry Pi only supports OpenGL ES which seems to be not compatible to
 
 ## Alignment
 
-<img src="alignment/images/alignment.jpg" width="1920"/>
+<img src="docs/alignment.jpg" width="1920"/>
 
-So far there is just a script that roughly aligns the resulting images using simple 2D position / rotation / scale operations.
-
-Next step is proper calibration. Because the RGB and ToF cameras are not coaxial, a homography (single-plane mapping) is not enough — but a checkerboard gives known 3D points, so each camera's pose relative to the board can be solved independently (`cv2.solvePnP`) and the full 6-DoF extrinsic between the cameras falls out of that. The plan is to calibrate both 2D cameras against the ToF point cloud so that RGB and thermal values can be assigned per point.
+The active RGB/ToF calibration workflow and capture instructions are in [alignment/README.md](alignment/README.md) and [plan.md](plan.md). Because the RGB and ToF cameras are not coaxial, a single-plane homography is not enough: matched checkerboard views allow independent board poses (`cv2.solvePnP`) and a 6-DoF transform from ToF points into RGB image coordinates. Thermal registration remains future work.
 
 ## Joint Bilateral Upscaling
 

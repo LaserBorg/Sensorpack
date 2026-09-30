@@ -12,7 +12,4 @@ ToF/output/*
 
 RGB/output/*
 
-alignment/images/*
-!alignment/images/alignment.jpg
-
-alignment/calib/*
+alignment/img/

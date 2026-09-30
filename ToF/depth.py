@@ -26,7 +26,7 @@ output_dir = "ToF/output/"
 os.makedirs(output_dir, exist_ok=True)
 
 
-def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, confidence=20):
+def main(cam_id=0, frame_average=20, save_maps=False, max_depth=4000, confidence=20):
     cam = ac.ArducamCamera()
 
     bilateralfilter = False
@@ -75,22 +75,25 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, confidence=
 
     vis.register_key_callback(ord("q"), exit_callback)
 
-    frame = cam.requestFrame(2000)
-    depth_mean = frame.depth_data
-    amplitude_mean = frame.confidence_data
+    depth_mean = None
+    amplitude_mean = None
     frame_count = 0
 
     while not exit_flag:
         frame = cam.requestFrame(2000)
         if frame is not None and isinstance(frame, ac.DepthData):
-            depth = frame.depth_data
-            amplitude_buf = frame.confidence_data
+            depth = np.nan_to_num(frame.depth_data)
+            amplitude_buf = np.nan_to_num(frame.confidence_data)
             
-            depth_mean = (depth_mean * frame_count + depth) / (frame_count + 1)
-            amplitude_mean = (amplitude_mean * frame_count + amplitude_buf) / (frame_count + 1)
+            if frame_count == 0:
+                depth_mean = depth.copy()
+                amplitude_mean = amplitude_buf.copy()
+            else:
+                depth_mean = (depth_mean * frame_count + depth) / (frame_count + 1)
+                amplitude_mean = (amplitude_mean * frame_count + amplitude_buf) / (frame_count + 1)
             frame_count += 1
 
-            depth = filter_buffer(depth_mean, amplitude_mean)
+            depth = filter_buffer(depth_mean.copy(), amplitude_mean)
             amplitude_buf = amplitude_mean
             
             # normalized amplitude buffer
@@ -134,8 +137,8 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, confidence=
                 pcd_path = os.path.join(output_dir, "pcd.ply")
                 o3d.io.write_point_cloud(pcd_path, pcd, write_ascii=False)
 
-                depth_mean = depth
-                amplitude_mean = amplitude_buf
+                depth_mean = None
+                amplitude_mean = None
                 frame_count = 0
 
             vis.update_geometry(pcd)
@@ -152,4 +155,4 @@ def main(cam_id=0, frame_average=0, save_maps=False, max_depth=4000, confidence=
 
 
 if __name__ == "__main__":
-    main(cam_id=8, frame_average=10, save_maps=False)
+    main(cam_id=8, frame_average=20, save_maps=False)

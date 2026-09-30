@@ -17,38 +17,48 @@ values per point. Thermal (MLX90640, 32x24) is deferred to a later phase.
 
 - Cameras rigidly mounted in the final enclosure (extrinsics are only valid for
   this mechanical state — recalibrate after any hardware change).
-- Checkerboard: 9x6 inner corners, ~25mm squares, high contrast, on a flat rigid
-  board. Print at 100% scale and verify square size with calipers.
-- ~20-30 board poses per calibration, covering the whole image (corners, edges,
-  center), with tilt in all directions.
+- Printed checkerboard: **9x6 inner corners** (10x7 squares). Mount it flat on a
+  rigid backing. Measure the actual square pitch with calipers and pass that
+  value in mm to both calibration commands; do not assume it is 25 mm.
+- Keep RGB focus and capture resolution fixed after calibration. Use the same
+  camera modes for calibration and colorization (4056x3040 RGB, 240x180 ToF).
+- First collect **one pilot pose** with the board fully in both views. Check
+  whether its squares are distinguishable in the *real* ToF amplitude image.
+  If detection fails, adjust distance, exposure/lighting and board angle before
+  attempting 20-30 static paired poses spread across the shared field of view.
+  Avoid motion while capturing and avoid extreme edge cropping.
 
 ## Phase 1: RGB intrinsics
 
-Script: `alignment/calibrate_rgb.py` (pattern: existing `alignment/calibrate.py`)
+Script: `alignment/calibrate_rgb.py`.
 
-1. Capture 20-30 stills of the checkerboard with the RGB camera
-   (`rpicam-still` or `RGB/RGB-cam.py`), fixed exposure/gain, full resolution.
-   Save to `alignment/images/rgb/`.
-2. `cv2.findChessboardCorners` + `cornerSubPix` on each image.
+1. Capture 20-30 paired poses with `alignment/capture_calib.py` (RGB saved at
+  4056x3040). Save to `alignment/img/rgb/` and `alignment/img/tof/`.
+2. `cv2.findChessboardCornersSB` on each RGB image; skip failed detections and
+  reject mixed image sizes.
 3. `cv2.calibrateCamera` → `K`, `dist`, per-view `rvecs`/`tvecs`.
-4. Check mean reprojection error (target < 0.5 px).
-5. Save to `alignment/rgb_intrinsics.json` (K, dist, image size, reprojection error).
+4. Inspect reprojection RMSE over *all corners* (aim below ~0.5 px; check
+  blurred or poorly distributed images if larger). Save `alignment/calibration/rgb_intrinsics.json`.
 
 ## Phase 2: ToF intrinsics verification
 
-The driver already provides firmware-calibrated intrinsics
-(fx=190.92, fy=191.25, cx=120.0, cy=90.0 for 240x180), read via
-`get_intrinsic_driver()`. Verify instead of re-calibrating:
+The driver provides firmware-calibrated intrinsics for the attached ToF camera;
+do not substitute example numbers from another unit. `capture_calib.py` stores
+its control values and frame size in `alignment/calibration/tof_intrinsics.json`.
+Verify rather than re-calibrating:
 
-1. **Distance test:** place the checkerboard at a known distance (e.g. 500mm,
-   measured with a tape from the lens center), capture a ToF frame, build the
-   point cloud, and measure the board's real-world size from the cloud
-   (known: 8x5 squares = 200x125mm). Check scale error < 1-2%.
-2. **Corner test (optional):** try `cv2.findChessboardCorners` on the ToF
-   *amplitude* image (grayscale-like, board should be high-amplitude). If it
-   works reliably, run `cv2.calibrateCamera` on the amplitude images and compare
-   against the driver values. If not, keep the driver intrinsics.
-3. Save the final values to `alignment/tof_intrinsics.json`.
+1. **Distance test:** compare the median range of a flat central board patch
+  with a tape measurement from near the ToF optical center at several distances;
+  account for surface/lens offsets and ToF noise. Investigate a repeatable
+  discrepancy before proceeding. Depth PNGs store *slant range in mm*.
+2. **Corner test:** pilot-capture the ToF *amplitude* image, which is only
+  240x180. The capture tool requires detection in both cameras and prints
+  which view failed. A 9x6 board has only an **8x5 square pitch** between its
+  outer inner corners, not the full 10x7 board width.
+3. If real ToF amplitude does not resolve the grid reliably, **stop**: the
+  implemented solvePnP path cannot infer ToF board corners from depth alone.
+  A different detectable target or a validated depth-plane correspondence
+  method would be needed before estimating extrinsics.
 
 ## Phase 3: RGB ↔ ToF extrinsics
 
@@ -56,31 +66,39 @@ Script: `alignment/calibrate_extrinsics.py`
 
 1. Capture N (20-30) poses where the checkerboard is fully visible in **both**
    cameras. For each pose save a matched pair:
-   - `rgb/pose_XX.jpg`
-   - `tof/pose_XX_depth.png` + `tof/pose_XX_amplitude.png`
+  - `alignment/img/rgb/pose_XX.jpg`
+  - `alignment/img/tof/pose_XX_depth.png` + `pose_XX_amplitude.png`
    (Board static during the pair; no hardware sync needed.)
 2. For each pose:
    - Detect corners in the RGB image → `solvePnP` → board pose in RGB frame
      (`T_rgb_board`).
-   - Detect corners in the ToF amplitude image (fallback: segment the board
-     plane from the point cloud and match corners geometrically) → `solvePnP`
+  - Detect corners in the ToF amplitude image → `solvePnP`
      → board pose in ToF frame (`T_tof_board`).
-3. Per-pose relative transform: `T_tof_rgb = T_tof_board · inv(T_rgb_board)`.
-4. Average over all poses (e.g. procrustes / least-squares on rotation, mean
-   translation) → final extrinsic.
-5. Save to `alignment/extrinsics_rgb_tof.json` (R, t in mm, per-pose residuals).
+3. Per-pose relative transform: `T_rgb_tof = T_rgb_board · inv(T_tof_board)`:
+  `p_rgb = R · p_tof + t` (the direction used by the colorizer).
+4. Average rotations with an SO(3) projection and translations with a mean;
+  inspect translation and rotation spread, rejecting inconsistent board
+  orientations. Re-capture poor or ambiguous poses rather than trusting an
+  average over them.
+5. Save to `alignment/calibration/extrinsics_rgb_tof.json` (R, t in mm, per-pose residuals).
 
 ## Phase 4: Colorized point cloud
 
 Script: `ToF/colorize.py`
 
-1. Load a ToF frame, build the point cloud (existing pipeline in `depth.py`).
+1. Autofocus RGB, then stream RGB and ToF together. Build a live point cloud
+  from a rolling average of 20 ToF depth/amplitude frames (`--frames` sets
+  the window size). Invalid or zero depth readings do not contribute to the
+  mean. Keep the scene still over the averaging window to avoid ghosting.
 2. For each point p (ToF camera coords):
-   - `p_rgb = R · p + t` → project with RGB K/dist → sample RGB pixel
-     (bilinear). Points outside the RGB image or behind the camera get no color.
+   - `p_rgb = R · p + t` → undistort the RGB frame, project with its new K and
+     bilinearly sample. Points outside the RGB image or behind the camera get
+     no color. Calibrated RGB resolution must match the capture mode.
 3. Assign per-point color, render/save PLY.
 4. **Validation:** point cloud of the checkerboard should show a clean,
    undistorted grid; straight edges in the scene should stay straight.
+  Press `s` in the Open3D window to save the current colored cloud and RGB
+  frame, `f` to refocus, or `q` to save the latest cloud and exit.
 
 ## Phase 5 (later): Thermal
 
@@ -94,16 +112,21 @@ Script: `ToF/colorize.py`
 
 | File | Content |
 |---|---|
-| `alignment/rgb_intrinsics.json` | K, dist, image size, reprojection error |
-| `alignment/tof_intrinsics.json` | K (driver or calibrated), image size |
-| `alignment/extrinsics_rgb_tof.json` | R, t (mm), per-pose residuals |
+| `alignment/calibration/rgb_intrinsics.json` | K, dist, image size, reprojection error |
+| `alignment/calibration/tof_intrinsics.json` | Firmware K, image size, distortion assumption |
+| `alignment/calibration/extrinsics_rgb_tof.json` | R, t (mm), per-pose residuals |
 | `alignment/calibrate_rgb.py` | Phase 1 script |
 | `alignment/calibrate_extrinsics.py` | Phase 3 script |
 | `ToF/colorize.py` | Phase 4 script |
 
-## Open questions
+## Before Capturing
 
-- Does corner detection work on the ToF amplitude image? (decides Phase 2/3 path)
-- Which point on the ToF lens is the optical center for distance measurements?
-- Should extrinsics be anchored to the ToF frame (yes, since the point cloud
-  lives there) — confirm no other frame is more convenient.
+1. Measure the printed squares; keep the board flat and the camera rig fixed.
+2. Run `python alignment/capture_calib.py --poses 1`. Hold the board still and
+  press `c` in the preview. A failed detection is not saved. Inspect the saved
+  RGB, amplitude and depth files before collecting the remaining 20-30 poses.
+3. Run `python alignment/capture_calib.py --poses 24` (it resumes at unused
+  pose numbers), then `python alignment/calibrate_rgb.py --square-size MM` and
+  `python alignment/calibrate_extrinsics.py --square-size MM` using the same
+  measured pitch for both commands. Inspect RMSE and transform spread before
+  `python ToF/colorize.py`. Never reuse extrinsics after moving either camera.

@@ -1,19 +1,16 @@
 '''
-Build a ToF point cloud and assign per-point RGB colors using the calibrated
-intrinsics + extrinsics.
-
-Pipeline:
-  1. capture one ToF frame (depth + amplitude) and one RGB still
-  2. build the point cloud in the ToF camera frame (slant range -> z-depth)
-  3. for each point: p_rgb = R @ p_tof + t  ->  project with RGB K/dist
-  4. sample the RGB pixel (bilinear); points outside the image get no color
+Continuously colorize a rolling average of ToF frames with live RGB.
+Press s to save the current cloud and RGB image, f to refocus, or q to quit.
+The latest cloud is also saved on exit. Keep the scene still while averaging.
 
 Usage:
-    python ToF/colorize.py [--rgb-id 0] [--tof-id 8] [--save ToF/output/pcd_colorized.ply]
+    python ToF/colorize.py [--rgb-id 0] [--tof-id 8] [--frames 20] [--save ToF/output/pcd_colorized.ply]
 '''
 
 import argparse
+from collections import deque
 import os
+import threading
 
 import cv2
 import numpy as np
@@ -24,14 +21,15 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from lib.depth_utils import (  # noqa: E402
     get_intrinsic_driver, convert_distance_to_zdepth, create_rgbd,
-    filter_by_luminance, create_visualizer, apply_default_view,
+    filter_by_luminance, create_visualizer, apply_default_view, create_frustum,
 )
 
 import ArducamDepthCamera as ac  # noqa: E402
 
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
-ALIGN_DIR = os.path.join(os.path.dirname(__file__), "..", "alignment")
+ALIGN_DIR = os.path.join(os.path.dirname(__file__), "..", "alignment", "calibration")
+RGB_SIZE = (4056, 3040)
 
 
 def load_calibration():
@@ -45,7 +43,13 @@ def load_calibration():
     dist_rgb = np.array(rgb["distortion_coefficients"], dtype=np.float64)
     R = np.array(ext["R"], dtype=np.float64)
     t = np.array(ext["t_mm"], dtype=np.float64)
-    return K_rgb, dist_rgb, R, t
+    rgb_size = (rgb["image_size"]["width"], rgb["image_size"]["height"])
+    if rgb_size != RGB_SIZE:
+        raise RuntimeError(
+            f"RGB calibration is {rgb_size[0]}x{rgb_size[1]}; "
+            f"recapture and recalibrate at {RGB_SIZE[0]}x{RGB_SIZE[1]}"
+        )
+    return K_rgb, dist_rgb, R, t, rgb_size
 
 
 def colorize_pointcloud(pcd, rgb_image, K, R, t):
@@ -84,10 +88,54 @@ def colorize_pointcloud(pcd, rgb_image, K, R, t):
     dy = (vv - y0).reshape(-1, 1)
     top = rgb_image[y0, x0] * (1 - dx) + rgb_image[y0, x1] * dx
     bot = rgb_image[y1, x0] * (1 - dx) + rgb_image[y1, x1] * dx
-    colors[idx[inside]] = (top * (1 - dy) + bot * dy) / 255.0
+    colors[idx[inside]] = (top * (1 - dy) + bot * dy)[:, ::-1] / 255.0
 
     pcd.colors = o3d.utility.Vector3dVector(colors)
     return pcd
+
+
+class RollingToFAverage:
+    def __init__(self, frame_count):
+        self.frames = deque(maxlen=frame_count)
+        self.frame_count = frame_count
+        self.depth_sum = None
+        self.depth_count = None
+        self.amplitude_sum = None
+
+    def add(self, depth, amplitude):
+        valid = np.isfinite(depth) & (depth > 0)
+        depth_values = np.where(valid, depth, 0).astype(np.float64)
+        amplitude_values = np.nan_to_num(amplitude, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float64)
+        if self.depth_sum is None:
+            self.depth_sum = np.zeros_like(depth_values)
+            self.depth_count = np.zeros_like(valid, dtype=np.int32)
+            self.amplitude_sum = np.zeros_like(amplitude_values)
+        if len(self.frames) == self.frame_count:
+            old_depth, old_valid, old_amplitude = self.frames.popleft()
+            self.depth_sum -= old_depth
+            self.depth_count -= old_valid
+            self.amplitude_sum -= old_amplitude
+        self.frames.append((depth_values, valid, amplitude_values))
+        self.depth_sum += depth_values
+        self.depth_count += valid
+        self.amplitude_sum += amplitude_values
+
+    def mean(self):
+        if len(self.frames) < self.frame_count:
+            return None
+        depth = np.divide(self.depth_sum, self.depth_count, out=np.zeros_like(self.depth_sum), where=self.depth_count > 0)
+        return depth.astype(np.float32), (self.amplitude_sum / self.frame_count).astype(np.float32)
+
+
+def read_tof_frame(cam, average):
+    frame = cam.requestFrame(200)
+    if frame is None or not isinstance(frame, ac.DepthData):
+        return False
+    try:
+        average.add(frame.depth_data, frame.confidence_data)
+    finally:
+        cam.releaseFrame(frame)
+    return True
 
 
 def main():
@@ -95,64 +143,142 @@ def main():
     parser.add_argument("--rgb-id", type=int, default=0)
     parser.add_argument("--tof-id", type=int, default=8)
     parser.add_argument("--confidence", type=int, default=20)
+    parser.add_argument("--frames", type=int, default=20, help="rolling ToF frames to average (default: 20)")
     parser.add_argument("--save", default=os.path.join(os.path.dirname(__file__), "output", "pcd_colorized.ply"))
     args = parser.parse_args()
+    if args.frames < 1:
+        parser.error("--frames must be at least 1")
 
-    K_rgb, dist_rgb, R, t = load_calibration()
+    K_rgb, dist_rgb, R, t, rgb_size = load_calibration()
 
-    # --- capture one RGB still (undistorted) ---
+    # --- stream RGB at the calibrated resolution ---
     picam2 = Picamera2(args.rgb_id)
-    config = picam2.create_still_configuration()
+    config = picam2.create_video_configuration({"size": rgb_size, "format": "RGB888"})
     picam2.configure(config)
-    picam2.start()
-    import time
-    time.sleep(2)
+    picam2.set_controls({"AfMode": 1, "AfSpeed": 1})
     rgb_path = os.path.join(os.path.dirname(__file__), "output", "colorize_rgb.jpg")
-    picam2.capture_file(rgb_path)
-    picam2.close()
+    rgb_lock = threading.Lock()
+    stop_rgb = threading.Event()
+    refocus_rgb = threading.Event()
+    latest_rgb = [None, 0]
+    rgb_error = [None]
 
-    # undistort the RGB image so ideal pinhole projection is valid
-    rgb_img = cv2.imread(rgb_path)
-    h, w = rgb_img.shape[:2]
-    new_K, _ = cv2.getOptimalNewCameraMatrix(K_rgb, dist_rgb, (w, h), 0, (w, h))
-    rgb_undistorted = cv2.undistort(rgb_img, K_rgb, dist_rgb, None, new_K)
-    # use new_K for projection
-    K_proj = new_K
+    def rgb_worker():
+        try:
+            while not stop_rgb.is_set():
+                if refocus_rgb.is_set():
+                    refocus_rgb.clear()
+                    if not picam2.autofocus_cycle(wait=True):
+                        print("RGB autofocus failed; check the scene and press f to retry")
+                frame = picam2.capture_array()  # RGB888 bytes are BGR for OpenCV
+                with rgb_lock:
+                    latest_rgb[0] = frame
+                    latest_rgb[1] += 1
+        except Exception as error:
+            rgb_error[0] = error
 
-    # --- capture one ToF frame ---
-    tof = ac.ArducamCamera()
-    ret = tof.open(ac.Connection.CSI, args.tof_id)
-    if ret != 0:
-        raise RuntimeError(f"Failed to open ToF camera: {ret}")
-    tof.start(ac.FrameType.DEPTH)
-    intrinsic = get_intrinsic_driver(tof)
+    rgb_thread = None
+    tof = None
+    vis = None
+    try:
+        picam2.start()
+        if not picam2.autofocus_cycle(wait=True):
+            raise RuntimeError("RGB autofocus failed; check the scene and retry")
+        new_K, _ = cv2.getOptimalNewCameraMatrix(K_rgb, dist_rgb, rgb_size, 0, rgb_size)
+        rgb_thread = threading.Thread(target=rgb_worker, daemon=True)
+        rgb_thread.start()
 
-    frame = tof.requestFrame(2000)
-    depth = np.nan_to_num(frame.depth_data)
-    amplitude = frame.confidence_data
-    tof.close()
+        tof = ac.ArducamCamera()
+        ret = tof.open(ac.Connection.CSI, args.tof_id)
+        if ret != 0:
+            raise RuntimeError(f"Failed to open ToF camera: {ret}")
+        if tof.start(ac.FrameType.DEPTH) != 0:
+            raise RuntimeError("Failed to start ToF camera")
+        intrinsic = get_intrinsic_driver(tof)
+        max_depth = tof.getControl(ac.Control.RANGE) or 4000
+        average = RollingToFAverage(args.frames)
 
-    # --- build point cloud in ToF frame ---
-    zdepth = convert_distance_to_zdepth(depth, intrinsic)
-    amp_clipped = np.clip(amplitude, 0, np.percentile(amplitude, 99))
-    amp_norm = cv2.normalize(amp_clipped, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    rgbd_image = create_rgbd(amp_norm, zdepth)
-    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
-    pcd = filter_by_luminance(pcd, args.confidence)
+        cv2.namedWindow("depth", cv2.WINDOW_AUTOSIZE)
+        cv2.namedWindow("amplitude", cv2.WINDOW_AUTOSIZE)
+        vis = create_visualizer(pointsize=1.5)
+        vis.add_geometry(create_frustum())
+        pcd = o3d.geometry.PointCloud()
+        vis.add_geometry(pcd)
+        apply_default_view(vis)
+        quit_requested = [False]
+        save_requested = [False]
+        vis.register_key_callback(ord("q"), lambda _: quit_requested.__setitem__(0, True))
+        vis.register_key_callback(ord("s"), lambda _: save_requested.__setitem__(0, True))
+        vis.register_key_callback(ord("f"), lambda _: refocus_rgb.set())
+        rgb_undistorted = None
+        current_rgb = None
+        rgb_version = 0
+        missed = 0
+        print("Warming up ToF; press s to save, f to refocus, q to quit")
 
-    # --- colorize ---
-    pcd = colorize_pointcloud(pcd, rgb_undistorted, K_proj, R, t)
+        def save_cloud():
+            if args.save and len(pcd.points):
+                os.makedirs(os.path.dirname(args.save) or ".", exist_ok=True)
+                os.makedirs(os.path.dirname(rgb_path), exist_ok=True)
+                o3d.io.write_point_cloud(args.save, pcd, write_ascii=False)
+                cv2.imwrite(rgb_path, current_rgb)
+                print(f"Saved {len(pcd.points)} points to {args.save}")
 
-    if args.save:
-        os.makedirs(os.path.dirname(args.save), exist_ok=True)
-        o3d.io.write_point_cloud(args.save, pcd, write_ascii=False)
-        print(f"Saved {len(pcd.points)} points to {args.save}")
+        while not quit_requested[0]:
+            if rgb_error[0] is not None:
+                raise RuntimeError("RGB capture stopped") from rgb_error[0]
+            if read_tof_frame(tof, average):
+                missed = 0
+            else:
+                missed += 1
+                if missed >= 10:
+                    raise RuntimeError("ToF stream stopped providing frames")
 
-    vis = create_visualizer()
-    vis.add_geometry(pcd)
-    apply_default_view(vis)
-    vis.run()
-    vis.destroy_window()
+            means = average.mean()
+            with rgb_lock:
+                frame, version = latest_rgb
+            if means is not None and frame is not None:
+                if version != rgb_version:
+                    if (frame.shape[1], frame.shape[0]) != rgb_size:
+                        raise RuntimeError("RGB stream resolution differs from calibration")
+                    current_rgb = frame
+                    rgb_undistorted = cv2.undistort(frame, K_rgb, dist_rgb, None, new_K)
+                    rgb_version = version
+                depth, amplitude = means
+                zdepth = convert_distance_to_zdepth(depth, intrinsic)
+                amp_clipped = np.clip(amplitude, 0, np.percentile(amplitude, 99))
+                amp_norm = cv2.normalize(amp_clipped, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                cv2.imshow("amplitude", amp_norm)
+                depth_preview = np.clip(depth * (255.0 / max_depth), 0, 255).astype(np.uint8)
+                cv2.imshow("depth", cv2.bitwise_not(depth_preview))
+                rgbd_image = create_rgbd(amp_norm, zdepth)
+                current_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
+                current_pcd = filter_by_luminance(current_pcd, args.confidence)
+                current_pcd = colorize_pointcloud(current_pcd, rgb_undistorted, new_K, R, t)
+                pcd.points = current_pcd.points
+                pcd.colors = current_pcd.colors
+                vis.update_geometry(pcd)
+
+            if not vis.poll_events():
+                break
+            vis.update_renderer()
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+            if save_requested[0]:
+                save_cloud()
+                save_requested[0] = False
+
+        save_cloud()
+    finally:
+        stop_rgb.set()
+        if rgb_thread is not None:
+            rgb_thread.join(timeout=2)
+        if tof is not None:
+            tof.close()
+        picam2.close()
+        if vis is not None:
+            vis.destroy_window()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

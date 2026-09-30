@@ -1,0 +1,31 @@
+{
+    "source": "Arducam firmware controls (raw values divided by 100)",
+    "image_size": {
+        "width": 240,
+        "height": 180
+    },
+    "camera_matrix": [
+        [
+            190.92,
+            0,
+            120.0
+        ],
+        [
+            0,
+            191.25,
+            90.0
+        ],
+        [
+            0,
+            0,
+            1
+        ]
+    ],
+    "distortion_coefficients": [
+        0,
+        0,
+        0,
+        0,
+        0
+    ]
+}

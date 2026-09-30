@@ -1,11 +1,11 @@
 '''
 Calibrate RGB camera intrinsics (pinhole + distortion) from checkerboard images.
 
-Expects images in alignment/calib/rgb/ (from capture_calib.py) or any directory
+Expects images in alignment/img/rgb/ (from capture_calib.py) or any directory
 of checkerboard photos.
 
 Usage:
-    python alignment/calibrate_rgb.py [--input alignment/calib/rgb] [--squares 9x6] [--square-size 25]
+    python alignment/calibrate_rgb.py [--input alignment/img/rgb] [--squares 9x6] [--square-size 25]
 '''
 
 import argparse
@@ -19,15 +19,13 @@ import numpy as np
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", default=os.path.join(os.path.dirname(__file__), "calib", "rgb"))
+    parser.add_argument("--input", default=os.path.join(os.path.dirname(__file__), "img", "rgb"))
     parser.add_argument("--squares", default="9x6", help="inner corners as WxH, e.g. 9x6")
     parser.add_argument("--square-size", type=float, default=25.0, help="square size in mm")
-    parser.add_argument("--output", default=os.path.join(os.path.dirname(__file__), "rgb_intrinsics.json"))
+    parser.add_argument("--output", default=os.path.join(os.path.dirname(__file__), "calibration", "rgb_intrinsics.json"))
     args = parser.parse_args()
 
     board_w, board_h = (int(v) for v in args.squares.lower().split("x"))
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-
     # 3D object points in the board frame (mm)
     objectp = np.zeros((board_w * board_h, 3), np.float32)
     objectp[:, :2] = np.mgrid[0:board_w, 0:board_h].T.reshape(-1, 2)
@@ -47,18 +45,18 @@ def main():
             failed.append((path, "unreadable"))
             continue
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        image_size = (img.shape[1], img.shape[0])
+        size = (img.shape[1], img.shape[0])
+        if image_size is not None and size != image_size:
+            raise SystemExit(f"Mixed RGB resolutions: {path} is {size}, expected {image_size}")
+        image_size = size
 
-        ret, corners = cv2.findChessboardCorners(
-            gray, (board_w, board_h),
-            cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE)
+        ret, corners = cv2.findChessboardCornersSB(gray, (board_w, board_h))
         if not ret:
             failed.append((path, "no corners"))
             continue
 
-        corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
         object_points.append(objectp)
-        image_points.append(corners)
+        image_points.append(corners.reshape(-1, 1, 2))
         print(f"  ok   {os.path.basename(path)}")
 
     for path, reason in failed:
@@ -70,13 +68,14 @@ def main():
     ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
         object_points, image_points, image_size, None, None)
 
-    # reprojection error
-    total_err = 0.0
+    # Root mean square pixel error over every detected corner.
+    total_squared_error = 0.0
+    total_corners = 0
     for i, (obj, img_pts) in enumerate(zip(object_points, image_points)):
         proj, _ = cv2.projectPoints(obj, rvecs[i], tvecs[i], K, dist)
-        err = cv2.norm(img_pts, proj.reshape(-1, 2), cv2.NORM_L2) / len(img_pts)
-        total_err += err ** 2
-    rmse = np.sqrt(total_err / len(object_points))
+        total_squared_error += np.sum((img_pts.reshape(-1, 2) - proj.reshape(-1, 2)) ** 2)
+        total_corners += len(img_pts)
+    rmse = np.sqrt(total_squared_error / total_corners)
 
     result = {
         "image_size": {"width": image_size[0], "height": image_size[1]},

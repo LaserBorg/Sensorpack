@@ -9,9 +9,9 @@ can see exactly what you are shooting. Interact via the OpenCV window keyboard:
     q           quit
 
 For each captured pose:
-  - one RGB still  -> alignment/calib/rgb/pose_XX.jpg
-  - one ToF frame  -> alignment/calib/tof/pose_XX_depth.png      (16-bit, mm)
-                      alignment/calib/tof/pose_XX_amplitude.png  (8-bit, normalized)
+    - one RGB still  -> alignment/img/rgb/pose_XX.jpg
+    - one ToF frame  -> alignment/img/tof/pose_XX_depth.png      (16-bit, mm)
+                                            alignment/img/tof/pose_XX_amplitude.png  (8-bit, normalized)
 
 The board must be fully visible in BOTH cameras for every pose. Hold the board
 still while capturing. Capture 20-30 poses covering the whole image (corners,
@@ -22,6 +22,7 @@ Usage:
 '''
 
 import argparse
+import json
 import os
 import threading
 import time
@@ -32,8 +33,9 @@ from picamera2 import Picamera2
 
 import ArducamDepthCamera as ac
 
-# libcamera AfState values
-AF_LOCKED = (2, 3)  # FocusedLocked, Focused
+# libcamera AfState.Focused (3 means Failed).
+AF_FOCUSED = 2
+RGB_SIZE = (4056, 3040)
 
 
 class State:
@@ -41,8 +43,10 @@ class State:
     def __init__(self):
         self.lock = threading.Lock()
         self.rgb = None          # latest full-res BGR frame
+        self.rgb_time = None
         self.tof_depth = None    # latest depth (float32, mm)
         self.tof_amp = None      # latest amplitude (float32)
+        self.tof_time = None
         self.af_request = False  # set by main thread to re-focus
         self.af_locked = False
         self.running = True
@@ -60,17 +64,17 @@ def rgb_worker(picam2, state):
             with state.lock:
                 state.af_locked = False
 
-        # frames flow immediately; AF lock is detected from metadata, not blocking
-        # (capture_array returns RGB888 from the camera buffer; convert to BGR
-        # for OpenCV display and for consistent saved JPEGs)
-        frame = picam2.capture_array()
-        if frame is not None:
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            md = picam2.capture_metadata()
-            with state.lock:
-                state.rgb = frame
-                if not state.af_locked and md.get("AfState", 0) in AF_LOCKED:
-                    state.af_locked = True
+        request = picam2.capture_request(flush=True)
+        try:
+            frame = request.make_array("main")
+            metadata = request.get_metadata()
+            timestamp = time.monotonic()
+        finally:
+            request.release()
+        with state.lock:
+            state.rgb = frame  # RGB888 is BGR byte order for OpenCV
+            state.rgb_time = timestamp
+            state.af_locked = metadata.get("AfState") == AF_FOCUSED
 
 
 def tof_worker(cam, state):
@@ -83,10 +87,12 @@ def tof_worker(cam, state):
         # copy out of the driver buffer before releasing
         depth = np.nan_to_num(frame.depth_data).copy()
         amp = frame.confidence_data.copy()
+        timestamp = time.monotonic()
         cam.releaseFrame(frame)
         with state.lock:
             state.tof_depth = depth
             state.tof_amp = amp
+            state.tof_time = timestamp
 
 
 def normalize_amp(amp):
@@ -105,19 +111,24 @@ def resize_for_display(img, max_w=800):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--poses", type=int, default=25)
+    parser.add_argument("--squares", default="9x6", help="inner corners as WxH")
     parser.add_argument("--rgb-id", type=int, default=0)
     parser.add_argument("--tof-id", type=int, default=8)
-    parser.add_argument("--outdir", default=os.path.join(os.path.dirname(__file__), "calib"))
+    parser.add_argument("--max-skew-ms", type=float, default=100, help="maximum RGB/ToF capture time difference")
+    parser.add_argument("--outdir", default=os.path.join(os.path.dirname(__file__), "img"))
     args = parser.parse_args()
+    if args.max_skew_ms <= 0:
+        parser.error("--max-skew-ms must be positive")
+    board_size = tuple(int(value) for value in args.squares.lower().split("x"))
 
     rgb_dir = os.path.join(args.outdir, "rgb")
     tof_dir = os.path.join(args.outdir, "tof")
     os.makedirs(rgb_dir, exist_ok=True)
     os.makedirs(tof_dir, exist_ok=True)
 
-    # --- open RGB (video mode: fast preview stream; 1080p is plenty for calibration) ---
+    # --- open RGB in the same 4:3 mode used by the colorizer ---
     picam2 = Picamera2(args.rgb_id)
-    picam2.configure(picam2.create_video_configuration({"size": (1920, 1080)}))
+    picam2.configure(picam2.create_video_configuration({"size": RGB_SIZE, "format": "RGB888"}))
     picam2.set_controls({"AfMode": 1, "AfSpeed": 1})  # auto, fast
     picam2.start()
 
@@ -127,6 +138,25 @@ def main():
     if ret != 0:
         raise RuntimeError(f"Failed to open ToF camera: {ret}")
     tof.start(ac.FrameType.DEPTH)
+    info = tof.getCameraInfo()
+    intrinsics = {
+        "source": "Arducam firmware controls (raw values divided by 100)",
+        "image_size": {"width": info.width, "height": info.height},
+        "camera_matrix": [
+            [tof.getControl(ac.Control.INTRINSIC_FX) / 100.0, 0, tof.getControl(ac.Control.INTRINSIC_CX) / 100.0],
+            [0, tof.getControl(ac.Control.INTRINSIC_FY) / 100.0, tof.getControl(ac.Control.INTRINSIC_CY) / 100.0],
+            [0, 0, 1],
+        ],
+        "distortion_coefficients": [0, 0, 0, 0, 0],
+    }
+    intrinsics_path = os.path.join(os.path.dirname(__file__), "calibration", "tof_intrinsics.json")
+    if os.path.exists(intrinsics_path):
+        with open(intrinsics_path) as file:
+            if json.load(file) != intrinsics:
+                raise SystemExit(f"ToF intrinsics changed; use a new --outdir: {intrinsics_path}")
+    else:
+        with open(intrinsics_path, "w") as file:
+            json.dump(intrinsics, file, indent=4)
 
     state = State()
     state.af_request = True  # focus on startup
@@ -141,6 +171,7 @@ def main():
 
     print("Controls: [c/Enter] capture pose  [f] re-focus  [q] quit")
     captured = 0
+    next_pose = 0
 
     try:
         while captured < args.poses:
@@ -165,25 +196,58 @@ def main():
             elif key in (ord("c"), 13, 10):  # c, Enter
                 with state.lock:
                     rgb = state.rgb
+                    rgb_time = state.rgb_time
                     depth = state.tof_depth
                     amp = state.tof_amp
+                    tof_time = state.tof_time
+                    af_locked = state.af_locked
 
                 if rgb is None or depth is None or amp is None:
                     print("  waiting for frames...")
                     continue
+                if not af_locked:
+                    print("  not saved: RGB autofocus is not locked; press f and hold the board still")
+                    continue
+                now = time.monotonic()
+                rgb_age_ms = (now - rgb_time) * 1000
+                tof_age_ms = (now - tof_time) * 1000
+                skew_ms = abs(rgb_time - tof_time) * 1000
+                if max(rgb_age_ms, tof_age_ms) > 500 or skew_ms > args.max_skew_ms:
+                    print(f"  not saved: frame age RGB={rgb_age_ms:.0f}ms ToF={tof_age_ms:.0f}ms, "
+                          f"skew={skew_ms:.0f}ms (limit {args.max_skew_ms:.0f}ms)")
+                    continue
 
-                name = f"pose_{captured:02d}"
+                rgb_gray = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
+                amp_preview = normalize_amp(amp)
+                rgb_ok, _ = cv2.findChessboardCornersSB(rgb_gray, board_size)
+                tof_ok, _ = cv2.findChessboardCornersSB(amp_preview, board_size)
+                if not (rgb_ok and tof_ok):
+                    print(f"  not saved: checkerboard corners RGB={rgb_ok}, ToF={tof_ok}; adjust board/lighting/distance")
+                    continue
+
+                name = f"pose_{next_pose:02d}"
+                while any(os.path.exists(path) for path in (
+                    os.path.join(rgb_dir, f"{name}.jpg"),
+                    os.path.join(tof_dir, f"{name}_depth.png"),
+                    os.path.join(tof_dir, f"{name}_amplitude.png"),
+                )):
+                    next_pose += 1
+                    name = f"pose_{next_pose:02d}"
                 rgb_path = os.path.join(rgb_dir, f"{name}.jpg")
                 depth_path = os.path.join(tof_dir, f"{name}_depth.png")
                 amp_path = os.path.join(tof_dir, f"{name}_amplitude.png")
 
-                cv2.imwrite(rgb_path, rgb)
-                cv2.imwrite(depth_path, (depth / 4000 * 65536).astype(np.uint16))
-                cv2.imwrite(amp_path, normalize_amp(amp))
+                if not cv2.imwrite(rgb_path, rgb):
+                    raise RuntimeError(f"Could not save {rgb_path}")
+                if not cv2.imwrite(depth_path, np.clip(depth, 0, 65535).astype(np.uint16)):
+                    raise RuntimeError(f"Could not save {depth_path}")
+                if not cv2.imwrite(amp_path, amp_preview):
+                    raise RuntimeError(f"Could not save {amp_path}")
 
                 print(f"  [{captured+1}/{args.poses}] saved {name} "
-                      f"(focus {'locked' if af_locked else 'NOT locked - press f'})")
+                        f"(RGB/ToF skew {skew_ms:.0f}ms)")
                 captured += 1
+                next_pose += 1
     finally:
         state.running = False
         rgb_t.join(timeout=2)

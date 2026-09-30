@@ -5,15 +5,6 @@ import datetime
 import os
 
 
-def load_frame(color_path, depth_path, max_depth=4000):
-    color = cv2.imread(color_path, -1)
-
-    depth_img = cv2.imread(depth_path, -1)
-    depth = (depth_img / 65536 * max_depth).astype(np.float32)
-
-    return color, depth
-
-
 def save_frame(frame, output_dir, is_depth=False, max_depth=4000):
     '''save as 16-bit PNG images'''
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -27,35 +18,6 @@ def save_frame(frame, output_dir, is_depth=False, max_depth=4000):
         filepath = os.path.join(output_dir, f"amplitude_{timestamp}.png")
     
     cv2.imwrite(filepath, frame.astype(dtype))
-
-
-def get_intrinsic(shape=(240,180), fov=70):
-
-    def calculate_fov(shape, fov):
-        aspect_ratio = shape[0] / shape[1]
-        fov_rad = np.deg2rad(fov)
-
-        hfov_rad = 2 * np.arctan(np.tan(fov_rad / 2) / np.sqrt(1 + (1 / aspect_ratio**2)))
-        vfov_rad = 2 * np.arctan(np.tan(fov_rad / 2) / np.sqrt(1 + aspect_ratio**2))
-
-        hfov = np.rad2deg(hfov_rad)
-        vfov = np.rad2deg(vfov_rad)
-        return [hfov, vfov]
-
-    fovs = calculate_fov(shape, fov)
-    width, height = shape
-
-    fx = width / (2 * np.tan(0.5 * np.pi * fovs[0] / 180))
-    fy = height / (2 * np.tan(0.5 * np.pi * fovs[1] / 180))
-    cx = width / 2
-    cy = height / 2
-
-    # K = np.array([[fx, 0, cx],
-    #               [0, fy, cy],
-    #               [0, 0, 1]])
-
-    camera_intrinsic = o3d.camera.PinholeCameraIntrinsic(width, height, fx, fy, cx, cy)
-    return camera_intrinsic
 
 
 def get_intrinsic_driver(cam):
