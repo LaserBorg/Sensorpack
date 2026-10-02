@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from capture_calib import State, rgb_worker
+from capture_calib import State, parse_rgb_size, rgb_worker
 
 
 class Request:
@@ -28,6 +28,10 @@ class Camera:
         self.request = Request(focus_state)
         self.flush = None
         self.calls = 0
+        self.controls = []
+
+    def set_controls(self, controls):
+        self.controls.append(controls)
 
     def capture_request(self, flush=None):
         self.calls += 1
@@ -37,6 +41,9 @@ class Camera:
 
 
 class CaptureTests(unittest.TestCase):
+    def test_parse_configurable_rgb_size(self):
+        self.assertEqual(parse_rgb_size("2028x1520"), (2028, 1520))
+
     def test_single_fresh_request_keeps_bgr_and_matching_focus_state(self):
         state = State()
         cam = Camera(state, 2)
@@ -56,6 +63,15 @@ class CaptureTests(unittest.TestCase):
         rgb_worker(cam, state)
 
         self.assertFalse(state.af_locked)
+
+    def test_focus_request_sends_libcamera_start_trigger(self):
+        state = State()
+        state.af_request = True
+        cam = Camera(state, 2)
+
+        rgb_worker(cam, state)
+
+        self.assertEqual(cam.controls, [{"AfTrigger": 0}])
 
 
 if __name__ == "__main__":

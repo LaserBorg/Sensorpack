@@ -21,7 +21,8 @@ values per point. Thermal (MLX90640, 32x24) is deferred to a later phase.
   rigid backing. Measure the actual square pitch with calipers and pass that
   value in mm to both calibration commands; do not assume it is 25 mm.
 - Keep RGB focus and capture resolution fixed after calibration. Use the same
-  camera modes for calibration and colorization (4056x3040 RGB, 240x180 ToF).
+  camera modes for calibration and colorization (2028x1520 RGB by default,
+  configurable with `--rgb-size`; 240x180 ToF).
 - First collect **one pilot pose** with the board fully in both views. Check
   whether its squares are distinguishable in the *real* ToF amplitude image.
   If detection fails, adjust distance, exposure/lighting and board angle before
@@ -33,19 +34,22 @@ values per point. Thermal (MLX90640, 32x24) is deferred to a later phase.
 Script: `alignment/calibrate_rgb.py`.
 
 1. Capture 20-30 paired poses with `alignment/capture_calib.py` (RGB saved at
-  4056x3040). Save to `alignment/img/rgb/` and `alignment/img/tof/`.
+  2028x1520 by default). Save to `alignment/img/rgb/` and `alignment/img/tof/`.
 2. `cv2.findChessboardCornersSB` on each RGB image; skip failed detections and
   reject mixed image sizes.
 3. `cv2.calibrateCamera` → `K`, `dist`, per-view `rvecs`/`tvecs`.
 4. Inspect reprojection RMSE over *all corners* (aim below ~0.5 px; check
   blurred or poorly distributed images if larger). Save `alignment/calibration/rgb_intrinsics.json`.
 
-## Phase 2: ToF intrinsics verification
+## Phase 2: ToF intrinsics
 
-The driver provides firmware-calibrated intrinsics for the attached ToF camera;
-do not substitute example numbers from another unit. `capture_calib.py` stores
-its control values and frame size in `alignment/calibration/tof_intrinsics.json`.
-Verify rather than re-calibrating:
+Script: `alignment/calibrate_tof.py`.
+
+Calibrate from the captured ToF amplitude checkerboard images, using the same
+board dimensions and measured square pitch as the RGB calibration. This writes
+`alignment/calibration/tof_intrinsics.json`, including the detected image size
+and board metadata. At least 10 useful views are required; use the reprojection
+RMSE and corner distribution to assess the result.
 
 1. **Distance test:** compare the median range of a flat central board patch
   with a tape measurement from near the ToF optical center at several distances;

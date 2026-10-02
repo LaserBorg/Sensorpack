@@ -155,4 +155,4 @@ def main(cam_id=0, frame_average=20, save_maps=False, max_depth=4000, confidence
 
 
 if __name__ == "__main__":
-    main(cam_id=8, frame_average=20, save_maps=False)
+    main(cam_id=8, frame_average=8, save_maps=False)

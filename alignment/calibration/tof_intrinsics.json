@@ -1,31 +1,40 @@
 {
-    "source": "Arducam firmware controls (raw values divided by 100)",
+    "source": "Checkerboard calibration from ToF amplitude images",
     "image_size": {
         "width": 240,
         "height": 180
     },
+    "board": {
+        "squares": [
+            9,
+            6
+        ],
+        "square_size_mm": 25.0
+    },
+    "num_images": 25,
+    "reprojection_rmse_px": 0.14508255753153615,
     "camera_matrix": [
         [
-            190.92,
-            0,
-            120.0
+            223.98222907371093,
+            0.0,
+            122.61279032723817
         ],
         [
-            0,
-            191.25,
-            90.0
+            0.0,
+            223.7740651314608,
+            83.21317617348332
         ],
         [
-            0,
-            0,
-            1
+            0.0,
+            0.0,
+            1.0
         ]
     ],
     "distortion_coefficients": [
-        0,
-        0,
-        0,
-        0,
-        0
+        0.12467352465071808,
+        -0.16609162343459638,
+        0.0030264028955957626,
+        0.0019650681031342593,
+        -0.5729371921010399
     ]
 }

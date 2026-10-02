@@ -26,13 +26,13 @@ import numpy as np
 
 
 def load_tof_intrinsics(json_path):
-    '''Load the intrinsics recorded with this capture session.'''
+    '''Load ToF intrinsics and board metadata.'''
     with open(json_path) as file:
         data = json.load(file)
     K = np.array(data["camera_matrix"], dtype=np.float64)
     dist = np.array(data["distortion_coefficients"], dtype=np.float64)
     size = (data["image_size"]["width"], data["image_size"]["height"])
-    return K, dist, size
+    return K, dist, size, data["board"]
 
 
 def detect_corners(gray, board_size):
@@ -83,7 +83,7 @@ def main():
     tof_intrinsics_path = args.tof_intrinsics or os.path.join(os.path.dirname(__file__), "calibration", "tof_intrinsics.json")
     for path in (args.rgb_intrinsics, tof_intrinsics_path):
         if not os.path.isfile(path):
-            raise SystemExit(f"Missing calibration: {path}. Run capture_calib.py, then calibrate_rgb.py first.")
+            raise SystemExit(f"Missing calibration: {path}. Run calibrate_rgb.py and calibrate_tof.py first.")
 
     # RGB intrinsics
     with open(args.rgb_intrinsics) as f:
@@ -96,7 +96,9 @@ def main():
         raise SystemExit("RGB intrinsics were calibrated with a different board; check --squares and --square-size")
 
     # ToF intrinsics
-    K_tof, dist_tof, tof_size = load_tof_intrinsics(tof_intrinsics_path)
+    K_tof, dist_tof, tof_size, tof_board = load_tof_intrinsics(tof_intrinsics_path)
+    if tof_board["squares"] != [board_w, board_h] or tof_board["square_size_mm"] != args.square_size:
+        raise SystemExit("ToF intrinsics were calibrated with a different board; check --squares and --square-size")
     print(f"ToF intrinsics: fx={K_tof[0,0]:.2f} fy={K_tof[1,1]:.2f} cx={K_tof[0,2]:.2f} cy={K_tof[1,2]:.2f} ({tof_size[0]}x{tof_size[1]})")
 
     rgb_files = sorted(glob.glob(os.path.join(args.calib_dir, "rgb", "pose_*.jpg")))

@@ -29,27 +29,26 @@ import ArducamDepthCamera as ac  # noqa: E402
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
 ALIGN_DIR = os.path.join(os.path.dirname(__file__), "..", "alignment", "calibration")
-RGB_SIZE = (4056, 3040)
 
 
 def load_calibration():
     import json
     with open(os.path.join(ALIGN_DIR, "rgb_intrinsics.json")) as f:
         rgb = json.load(f)
+    with open(os.path.join(ALIGN_DIR, "tof_intrinsics.json")) as f:
+        tof = json.load(f)
     with open(os.path.join(ALIGN_DIR, "extrinsics_rgb_tof.json")) as f:
         ext = json.load(f)
 
     K_rgb = np.array(rgb["camera_matrix"], dtype=np.float64)
     dist_rgb = np.array(rgb["distortion_coefficients"], dtype=np.float64)
+    K_tof = np.array(tof["camera_matrix"], dtype=np.float64)
+    dist_tof = np.array(tof["distortion_coefficients"], dtype=np.float64)
     R = np.array(ext["R"], dtype=np.float64)
     t = np.array(ext["t_mm"], dtype=np.float64)
     rgb_size = (rgb["image_size"]["width"], rgb["image_size"]["height"])
-    if rgb_size != RGB_SIZE:
-        raise RuntimeError(
-            f"RGB calibration is {rgb_size[0]}x{rgb_size[1]}; "
-            f"recapture and recalibrate at {RGB_SIZE[0]}x{RGB_SIZE[1]}"
-        )
-    return K_rgb, dist_rgb, R, t, rgb_size
+    tof_size = (tof["image_size"]["width"], tof["image_size"]["height"])
+    return K_rgb, dist_rgb, K_tof, dist_tof, R, t, rgb_size, tof_size
 
 
 def colorize_pointcloud(pcd, rgb_image, K, R, t):
@@ -143,13 +142,13 @@ def main():
     parser.add_argument("--rgb-id", type=int, default=0)
     parser.add_argument("--tof-id", type=int, default=8)
     parser.add_argument("--confidence", type=int, default=20)
-    parser.add_argument("--frames", type=int, default=20, help="rolling ToF frames to average (default: 20)")
+    parser.add_argument("--frames", type=int, default=8, help="rolling ToF frames to average (default: 20)")
     parser.add_argument("--save", default=os.path.join(os.path.dirname(__file__), "output", "pcd_colorized.ply"))
     args = parser.parse_args()
     if args.frames < 1:
         parser.error("--frames must be at least 1")
 
-    K_rgb, dist_rgb, R, t, rgb_size = load_calibration()
+    K_rgb, dist_rgb, K_tof, dist_tof, R, t, rgb_size, tof_size = load_calibration()
 
     # --- stream RGB at the calibrated resolution ---
     picam2 = Picamera2(args.rgb_id)
@@ -194,7 +193,16 @@ def main():
             raise RuntimeError(f"Failed to open ToF camera: {ret}")
         if tof.start(ac.FrameType.DEPTH) != 0:
             raise RuntimeError("Failed to start ToF camera")
-        intrinsic = get_intrinsic_driver(tof)
+        driver_intrinsic = get_intrinsic_driver(tof)
+        if (driver_intrinsic.width, driver_intrinsic.height) != tof_size:
+            raise RuntimeError("ToF stream resolution differs from calibration")
+        tof_new_K, _ = cv2.getOptimalNewCameraMatrix(
+            K_tof, dist_tof, tof_size, 0, tof_size)
+        tof_map_x, tof_map_y = cv2.initUndistortRectifyMap(
+            K_tof, dist_tof, None, tof_new_K, tof_size, cv2.CV_32FC1)
+        intrinsic = o3d.camera.PinholeCameraIntrinsic(
+            tof_size[0], tof_size[1], tof_new_K[0, 0], tof_new_K[1, 1],
+            tof_new_K[0, 2], tof_new_K[1, 2])
         max_depth = tof.getControl(ac.Control.RANGE) or 4000
         average = RollingToFAverage(args.frames)
 
@@ -245,6 +253,8 @@ def main():
                     rgb_undistorted = cv2.undistort(frame, K_rgb, dist_rgb, None, new_K)
                     rgb_version = version
                 depth, amplitude = means
+                depth = cv2.remap(depth, tof_map_x, tof_map_y, cv2.INTER_NEAREST)
+                amplitude = cv2.remap(amplitude, tof_map_x, tof_map_y, cv2.INTER_NEAREST)
                 zdepth = convert_distance_to_zdepth(depth, intrinsic)
                 amp_clipped = np.clip(amplitude, 0, np.percentile(amplitude, 99))
                 amp_norm = cv2.normalize(amp_clipped, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)

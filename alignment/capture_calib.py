@@ -18,11 +18,10 @@ still while capturing. Capture 20-30 poses covering the whole image (corners,
 edges, center) with tilt in all directions.
 
 Usage:
-    python alignment/capture_calib.py [--poses 25] [--rgb-id 0] [--tof-id 8]
+    python alignment/capture_calib.py [--poses 25] [--rgb-size 2028x1520] [--rgb-id 0] [--tof-id 8]
 '''
 
 import argparse
-import json
 import os
 import threading
 import time
@@ -35,7 +34,18 @@ import ArducamDepthCamera as ac
 
 # libcamera AfState.Focused (3 means Failed).
 AF_FOCUSED = 2
-RGB_SIZE = (4056, 3040)
+# libcamera AfTriggerStart (AfTriggerCancel is 1).
+AF_TRIGGER_START = 0
+
+
+def parse_rgb_size(value):
+    try:
+        width, height = (int(part) for part in value.lower().split("x"))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("RGB size must be WIDTHxHEIGHT") from error
+    if width <= 0 or height <= 0:
+        raise argparse.ArgumentTypeError("RGB dimensions must be positive")
+    return width, height
 
 
 class State:
@@ -60,7 +70,7 @@ def rgb_worker(picam2, state):
             state.af_request = False
 
         if need_focus:
-            picam2.set_controls({"AfTrigger": 1})  # start autofocus
+            picam2.set_controls({"AfTrigger": AF_TRIGGER_START})
             with state.lock:
                 state.af_locked = False
 
@@ -112,9 +122,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--poses", type=int, default=25)
     parser.add_argument("--squares", default="9x6", help="inner corners as WxH")
+    parser.add_argument("--rgb-size", type=parse_rgb_size, default=(2028, 1520),
+                        help="RGB capture size as WxH (default: 2028x1520)")
     parser.add_argument("--rgb-id", type=int, default=0)
     parser.add_argument("--tof-id", type=int, default=8)
-    parser.add_argument("--max-skew-ms", type=float, default=100, help="maximum RGB/ToF capture time difference")
+    parser.add_argument("--max-skew-ms", type=float, default=400,
+                        help="maximum RGB/ToF capture time difference (default: 400 ms)")
     parser.add_argument("--outdir", default=os.path.join(os.path.dirname(__file__), "img"))
     args = parser.parse_args()
     if args.max_skew_ms <= 0:
@@ -128,7 +141,7 @@ def main():
 
     # --- open RGB in the same 4:3 mode used by the colorizer ---
     picam2 = Picamera2(args.rgb_id)
-    picam2.configure(picam2.create_video_configuration({"size": RGB_SIZE, "format": "RGB888"}))
+    picam2.configure(picam2.create_video_configuration({"size": args.rgb_size, "format": "RGB888"}))
     picam2.set_controls({"AfMode": 1, "AfSpeed": 1})  # auto, fast
     picam2.start()
 
@@ -138,26 +151,6 @@ def main():
     if ret != 0:
         raise RuntimeError(f"Failed to open ToF camera: {ret}")
     tof.start(ac.FrameType.DEPTH)
-    info = tof.getCameraInfo()
-    intrinsics = {
-        "source": "Arducam firmware controls (raw values divided by 100)",
-        "image_size": {"width": info.width, "height": info.height},
-        "camera_matrix": [
-            [tof.getControl(ac.Control.INTRINSIC_FX) / 100.0, 0, tof.getControl(ac.Control.INTRINSIC_CX) / 100.0],
-            [0, tof.getControl(ac.Control.INTRINSIC_FY) / 100.0, tof.getControl(ac.Control.INTRINSIC_CY) / 100.0],
-            [0, 0, 1],
-        ],
-        "distortion_coefficients": [0, 0, 0, 0, 0],
-    }
-    intrinsics_path = os.path.join(os.path.dirname(__file__), "calibration", "tof_intrinsics.json")
-    if os.path.exists(intrinsics_path):
-        with open(intrinsics_path) as file:
-            if json.load(file) != intrinsics:
-                raise SystemExit(f"ToF intrinsics changed; use a new --outdir: {intrinsics_path}")
-    else:
-        with open(intrinsics_path, "w") as file:
-            json.dump(intrinsics, file, indent=4)
-
     state = State()
     state.af_request = True  # focus on startup
 
